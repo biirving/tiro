@@ -36,8 +36,16 @@ function messages(
   return [{ role: 'system', content: `${guide}\n\n${documentBlock(doc)}` }, ...tail]
 }
 
-/** Rounds of searching before we stop and answer with what we have. */
-const MAX_TOOL_ROUNDS = 6
+/**
+ * Search budget for one question. Reaching either limit withholds the tools on
+ * the last request rather than aborting, so the search is never wasted.
+ */
+const MAX_TOOL_ROUNDS = 24
+const MAX_TOOL_OUTPUT_CHARS = 240_000
+
+const WRAP_UP =
+  'You have used the search budget for this question. Do not look anything else up. ' +
+  'Answer now with what you have found, and say plainly what you were unable to determine.'
 
 function repoTools(): OpenAI.Chat.ChatCompletionTool[] {
   return CODE_TOOLS.map((tool) => ({
@@ -59,7 +67,12 @@ export const openaiProvider: Provider = {
       { role: 'user', content: userTurn(request) },
     ]
 
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    let toolOutput = 0
+
+    for (let round = 0; ; round++) {
+      const wrapUp = round >= MAX_TOOL_ROUNDS || toolOutput >= MAX_TOOL_OUTPUT_CHARS
+      if (wrapUp) tail.push({ role: 'user', content: WRAP_UP })
+
       const stream = await client().chat.completions.create(
         {
           model: model(),
@@ -67,6 +80,7 @@ export const openaiProvider: Provider = {
           prompt_cache_key: doc.cacheKey,
           stream_options: { include_usage: true },
           ...(tools ? { tools } : {}),
+          ...(wrapUp ? { tool_choice: 'none' as const } : {}),
           messages: messages(doc, tail, Boolean(repoPath)),
         },
         { signal },
@@ -104,16 +118,8 @@ export const openaiProvider: Provider = {
         })
       }
 
-      if (calls.size === 0 || !repoPath) {
+      if (calls.size === 0 || !repoPath || wrapUp) {
         emit({ type: 'done' })
-        return
-      }
-
-      if (round === MAX_TOOL_ROUNDS) {
-        emit({
-          type: 'error',
-          message: `Stopped after ${MAX_TOOL_ROUNDS} rounds of searching the repository.`,
-        })
         return
       }
 

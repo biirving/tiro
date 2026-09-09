@@ -38,8 +38,19 @@ function model(): string {
   return id
 }
 
-/** Rounds of searching before we stop and answer with what we have. */
-const MAX_TOOL_ROUNDS = 6
+/**
+ * Search budget for one question.
+ *
+ * Reaching either limit does not abort — the last request goes out with tools
+ * withheld, so the model must answer with what it found. Throwing away a long
+ * search because it ran long is the worst possible outcome.
+ */
+const MAX_TOOL_ROUNDS = 24
+const MAX_TOOL_OUTPUT_CHARS = 240_000
+
+const WRAP_UP =
+  'You have used the search budget for this question. Do not look anything else up. ' +
+  'Answer now with what you have found, and say plainly what you were unable to determine.'
 
 function repoTools(): Anthropic.Beta.BetaToolUnion[] {
   return CODE_TOOLS.map((tool) => ({
@@ -80,7 +91,14 @@ export const anthropicProvider: Provider = {
       { role: 'user', content: userTurn(request) },
     ]
 
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    let toolOutput = 0
+
+    for (let round = 0; ; round++) {
+      // Out of budget: same conversation, tools withheld, so an answer is the
+      // only thing it can produce.
+      const wrapUp = round >= MAX_TOOL_ROUNDS || toolOutput >= MAX_TOOL_OUTPUT_CHARS
+      if (wrapUp) messages.push({ role: 'user', content: WRAP_UP })
+
       const stream = client().beta.messages.stream(
         {
           model: model(),
@@ -91,6 +109,7 @@ export const anthropicProvider: Provider = {
           output_config: { effort: DOC_EFFORT },
           system: system(doc, Boolean(repoPath)),
           ...(tools ? { tools } : {}),
+          ...(wrapUp ? { tool_choice: { type: 'none' as const } } : {}),
           messages,
         },
         { signal },
@@ -119,16 +138,8 @@ export const anthropicProvider: Provider = {
         return
       }
 
-      if (final.stop_reason !== 'tool_use' || !repoPath) {
+      if (final.stop_reason !== 'tool_use' || !repoPath || wrapUp) {
         emit({ type: 'done' })
-        return
-      }
-
-      if (round === MAX_TOOL_ROUNDS) {
-        emit({
-          type: 'error',
-          message: `Stopped after ${MAX_TOOL_ROUNDS} rounds of searching the repository.`,
-        })
         return
       }
 
@@ -146,6 +157,7 @@ export const anthropicProvider: Provider = {
         } catch (error) {
           output = `That lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`
         }
+        toolOutput += output.length
         results.push({ type: 'tool_result', tool_use_id: block.id, content: output })
       }
       // All results in one user message; splitting them teaches the model to

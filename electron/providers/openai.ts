@@ -1,18 +1,11 @@
 import OpenAI from 'openai'
 import { zodResponseFormat } from 'openai/helpers/zod'
-import type { Concept, ModelOption } from '@shared/types'
+import type { ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import {
-  CONCEPTS_TASK,
-  ConceptsSchema,
-  documentBlock,
-  GUIDE,
-  normalizeConcepts,
-  userTurn,
-} from './prompts'
-import { historyTurns, type AskArgs, type Provider } from './types'
+import { documentBlock, GUIDE, userTurn } from './prompts'
+import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromOpenAIUsage, reportUsage } from './usage'
 
 function client(): OpenAI {
@@ -83,21 +76,21 @@ export const openaiProvider: Provider = {
     emit({ type: 'done' })
   },
 
-  async extractConcepts(doc: StoredDoc, signal: AbortSignal): Promise<Concept[]> {
+  async structured<T>({ label, doc, user, schema, signal }: StructuredCall<T>): Promise<T> {
     const started = Date.now()
     const completion = await client().chat.completions.parse(
       {
         model: model(),
         prompt_cache_key: doc.cacheKey,
-        messages: messages(doc, [{ role: 'user', content: CONCEPTS_TASK }]),
-        response_format: zodResponseFormat(ConceptsSchema, 'concepts'),
+        messages: messages(doc, [{ role: 'user', content: user }]),
+        response_format: zodResponseFormat(schema, label),
       },
       { signal, timeout: 20 * 60 * 1000 },
     )
 
     if (completion.usage) {
       reportUsage({
-        label: 'concepts',
+        label,
         provider: 'openai',
         model: model(),
         usage: fromOpenAIUsage(completion.usage),
@@ -106,14 +99,10 @@ export const openaiProvider: Provider = {
     }
 
     const choice = completion.choices[0]
-    if (choice?.message.refusal) {
-      throw new Error(`The model declined: ${choice.message.refusal}`)
-    }
+    if (choice?.message.refusal) throw new Error(`The model declined: ${choice.message.refusal}`)
     const parsed = choice?.message.parsed
-    if (!parsed) {
-      throw new Error('The model returned concepts in an unreadable shape. Try again.')
-    }
-    return normalizeConcepts(parsed, doc.pages.length)
+    if (!parsed) throw new Error('The model returned an unreadable shape. Try again.')
+    return parsed as T
   },
 
   async listModels(): Promise<ModelOption[]> {

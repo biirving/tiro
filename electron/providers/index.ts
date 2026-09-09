@@ -32,7 +32,8 @@ import {
 } from './errors'
 import { describeOpenAIError, isOpenAIAbort, openaiProvider } from './openai'
 import { ollamaProvider } from './ollama'
-import type { Provider } from './types'
+import { CONCEPTS_TASK, ConceptsSchema, normalizeConcepts } from './prompts'
+import type { Provider, StructuredCall } from './types'
 import { reportFailure } from './usage'
 
 export { sessionTotals } from './usage'
@@ -110,20 +111,42 @@ export function cancelAsk(streamId: string): void {
   running.delete(streamId)
 }
 
-export async function extractConcepts(docId: string): Promise<Concept[]> {
+/**
+ * Runs one structured call against a document, under a cancellable key.
+ * Shared by the concept pass and the code pass so both get the same document
+ * cache, the same abort handling, and the same failure reporting.
+ */
+export async function runStructured<T>(
+  key: string,
+  docId: string,
+  call: Omit<StructuredCall<T>, 'doc' | 'signal'>,
+): Promise<T> {
   const doc = getDoc(docId)
   if (!doc) throw new MissingDocError()
 
   const controller = new AbortController()
-  running.set(`concepts:${docId}`, controller)
+  running.set(key, controller)
   try {
-    return await resolve().extractConcepts(doc, controller.signal)
+    return await resolve().structured({ ...call, doc, signal: controller.signal })
   } catch (error) {
-    if (!isAbort(error)) reportFailure('concepts', error)
+    if (!isAbort(error)) reportFailure(call.label, error)
     throw error
   } finally {
-    running.delete(`concepts:${docId}`)
+    running.delete(key)
   }
+}
+
+export async function extractConcepts(docId: string): Promise<Concept[]> {
+  const doc = getDoc(docId)
+  if (!doc) throw new MissingDocError()
+
+  const parsed = await runStructured(`concepts:${docId}`, docId, {
+    label: 'concepts',
+    user: CONCEPTS_TASK,
+    schema: ConceptsSchema,
+    maxTokens: 24000,
+  })
+  return normalizeConcepts(parsed, doc.pages.length)
 }
 
 function isAbort(error: unknown): boolean {

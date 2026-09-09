@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AskEvent,
   AskRequest,
+  Concept,
   DocPayload,
   MenuAction,
   OpenedPdf,
@@ -15,6 +16,13 @@ const bridge: TiroBridge = {
   readPdf: (path) => ipcRenderer.invoke('tiro:read-pdf', path),
   registerDoc: (payload: DocPayload) => ipcRenderer.invoke('tiro:register-doc', payload),
   concepts: (docId) => ipcRenderer.invoke('tiro:concepts', docId),
+
+  pickRepo: () => ipcRenderer.invoke('tiro:pick-repo'),
+  linkRepo: (path: string) => ipcRenderer.invoke('tiro:link-repo', path),
+  matchCode: (docId: string, repoPath: string, concepts: Concept[]) =>
+    ipcRenderer.invoke('tiro:match-code', docId, repoPath, concepts),
+  readCode: (repoPath: string, filePath: string) =>
+    ipcRenderer.invoke('tiro:read-code', repoPath, filePath),
 
   ask: (streamId, request: AskRequest, onEvent) => {
     const channel = `tiro:ask:${streamId}`

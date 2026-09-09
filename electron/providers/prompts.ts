@@ -89,13 +89,6 @@ export const ConceptsSchema = z.object({
   concepts: z.array(ConceptSchema),
 })
 
-/** The same shape as JSON Schema, for providers that take one directly. */
-export function conceptsJsonSchema(): Record<string, unknown> {
-  const schema = z.toJSONSchema(ConceptsSchema) as Record<string, unknown>
-  delete schema.$schema
-  return schema
-}
-
 export type ParsedConcepts = z.infer<typeof ConceptsSchema>
 
 /** Trusts nothing: clamps pages into range and drops empty entries. */
@@ -113,12 +106,12 @@ export function normalizeConcepts(parsed: ParsedConcepts, pageCount: number): Co
 }
 
 /**
- * Pulls the JSON object out of a model's reply.
+ * Pulls a schema-valid object out of a model's reply.
  *
- * Anthropic and OpenAI both guarantee schema-valid JSON, but a local model asked
- * for JSON may still wrap it in prose or a code fence.
+ * Anthropic and OpenAI guarantee the shape, but a local model asked for JSON may
+ * still wrap it in prose or a code fence.
  */
-export function parseConceptsReply(raw: string, pageCount: number): Concept[] {
+export function parseStructuredReply<T>(raw: string, schema: z.ZodType<T>): T {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(raw)
   const candidate = (fenced?.[1] ?? raw).trim()
   const start = candidate.indexOf('{')
@@ -134,11 +127,79 @@ export function parseConceptsReply(raw: string, pageCount: number): Concept[] {
     throw new Error('The model returned malformed JSON. Try again, or use a larger model.')
   }
 
-  const result = ConceptsSchema.safeParse(json)
+  const result = schema.safeParse(json)
   if (!result.success) {
-    throw new Error(
-      'The model returned JSON that does not match the concept shape. Try a larger model.',
-    )
+    throw new Error('The model returned JSON in the wrong shape. Try a larger model.')
   }
-  return normalizeConcepts(result.data, pageCount)
+  return result.data
+}
+
+// --- matching concepts to code ------------------------------------------------
+
+/**
+ * The model picks candidates by id and never writes a path.
+ *
+ * Every location therefore comes from the local index, so a hallucinated file
+ * is not merely unlikely — it is unrepresentable.
+ */
+export const CodeMatchSchema = z.object({
+  matches: z.array(
+    z.object({
+      conceptId: z.string(),
+      locations: z.array(
+        z.object({
+          candidateId: z.string().describe('The id of one of the candidates given.'),
+          reason: z
+            .string()
+            .describe('One sentence: what this code does, and how it realises the concept.'),
+        }),
+      ),
+    }),
+  ),
+})
+
+export type ParsedCodeMatches = z.infer<typeof CodeMatchSchema>
+
+export const CODE_TASK = `Below are concepts from this paper, each with candidate locations found in the repository by a local search over identifier names and comments. The search is deliberately loose, so most candidates are wrong.
+
+For each concept, pick the candidates that genuinely implement it — the code a reader of the paper would actually want to see.
+
+- Refer to candidates by id only. Never write a path yourself.
+- At most three per concept, best first.
+- Picking nothing is usually correct. A claim, a result, or a piece of notation normally has no implementation, and a repository rarely implements every idea a paper discusses.
+- A shared word is not a match. Tests, argument parsing, logging, and configuration are not implementations of an idea.
+- For each pick, say in one sentence what the code does and how it corresponds to the concept. Name the function or class where that helps.`
+
+export interface CandidateBlock {
+  id: string
+  path: string
+  startLine: number
+  endLine: number
+  symbol?: string
+  code: string
+}
+
+export interface ConceptBlock {
+  id: string
+  term: string
+  definition: string
+  candidates: CandidateBlock[]
+}
+
+/** The whole of what varies for a code pass: concepts and their shortlists. */
+export function codeTaskFor(repoName: string, concepts: ConceptBlock[]): string {
+  const blocks = concepts
+    .map((concept) => {
+      const candidates = concept.candidates
+        .map(
+          (candidate) =>
+            `  <candidate id="${candidate.id}" path="${candidate.path}" lines="${candidate.startLine}-${candidate.endLine}"` +
+            `${candidate.symbol ? ` symbol="${candidate.symbol}"` : ''}>\n${candidate.code}\n  </candidate>`,
+        )
+        .join('\n')
+      return `<concept id="${concept.id}" term="${concept.term}">\n  ${concept.definition}\n${candidates}\n</concept>`
+    })
+    .join('\n\n')
+
+  return `${CODE_TASK}\n\nRepository: ${repoName}\n\n${blocks}`
 }

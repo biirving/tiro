@@ -8,19 +8,13 @@
  * a JSON schema for structured output, and needs no SDK.
  */
 
-import type { Concept, ModelOption } from '@shared/types'
+import * as z from 'zod'
+import type { ModelOption } from '@shared/types'
 import { estimateTokens, type StoredDoc } from '../docs'
 import { activeModel, ollamaHost } from '../settings'
 import { ContextTooSmallError, MissingModelError, OllamaUnreachableError } from './errors'
-import {
-  CONCEPTS_TASK,
-  conceptsJsonSchema,
-  documentBlock,
-  GUIDE,
-  parseConceptsReply,
-  userTurn,
-} from './prompts'
-import { historyTurns, type AskArgs, type Provider } from './types'
+import { documentBlock, GUIDE, parseStructuredReply, userTurn } from './prompts'
+import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { reportLocalUsage } from './usage'
 
 /** Keeps the model resident between questions, which is most of the local UX. */
@@ -141,7 +135,7 @@ function charCount(messages: ChatMessage[]): number {
  * that number collapses to just the new turn, which is the signal we want.
  */
 function reportOllama(
-  label: 'ask' | 'concepts',
+  label: 'ask' | 'concepts' | 'code',
   name: string,
   messages: ChatMessage[],
   counts: { evaluated: number | null; output: number | null },
@@ -225,10 +219,10 @@ export const ollamaProvider: Provider = {
     emit({ type: 'done' })
   },
 
-  async extractConcepts(doc: StoredDoc, signal: AbortSignal): Promise<Concept[]> {
+  async structured<T>({ label, doc, user, schema, signal }: StructuredCall<T>): Promise<T> {
     const started = Date.now()
     const name = model()
-    const messages = chatMessages(doc, [{ role: 'user', content: CONCEPTS_TASK }])
+    const messages = chatMessages(doc, [{ role: 'user', content: user }])
     const numCtx = await windowFor(name, doc, charCount(messages))
 
     const response = await call('/api/chat', {
@@ -242,7 +236,7 @@ export const ollamaProvider: Provider = {
         keep_alive: KEEP_ALIVE,
         // A JSON schema here constrains decoding, the local equivalent of
         // structured output.
-        format: conceptsJsonSchema(),
+        format: z.toJSONSchema(schema),
         options: { num_ctx: numCtx },
       }),
     })
@@ -253,15 +247,14 @@ export const ollamaProvider: Provider = {
       eval_count?: number
     }
     reportOllama(
-      'concepts',
+      label,
       name,
       messages,
       { evaluated: payload.prompt_eval_count ?? null, output: payload.eval_count ?? null },
       Date.now() - started,
     )
 
-    const raw = payload.message?.content ?? ''
-    return parseConceptsReply(raw, doc.pages.length)
+    return parseStructuredReply(payload.message?.content ?? '', schema)
   },
 
   async listModels(): Promise<ModelOption[]> {

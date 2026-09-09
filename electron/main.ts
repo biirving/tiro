@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url'
 import type {
   AskEvent,
   AskRequest,
+  Concept,
   DocPayload,
   Failure,
   MenuAction,
@@ -33,6 +34,8 @@ import {
   sessionTotals,
 } from './providers'
 import { configureUsageLog, reportDocument, reportProvider } from './providers/usage'
+import { linkRepo, matchCode } from './repo/match'
+import { readCode } from './repo/read'
 import { clearApiKey, setApiKey, setOllamaHost, setProvider } from './settings'
 
 const isDev = !app.isPackaged
@@ -366,6 +369,49 @@ function registerIpc(): void {
   )
 
   ipcMain.on('tiro:cancel-ask', (_event, streamId: string) => cancelAsk(streamId))
+
+  ipcMain.handle('tiro:pick-repo', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Choose the repository for this paper',
+      properties: ['openDirectory'],
+      buttonLabel: 'Link repository',
+    })
+    const path = result.filePaths[0]
+    if (result.canceled || !path) return null
+    try {
+      return await linkRepo(path)
+    } catch {
+      // The renderer links explicitly next, which reports the real reason.
+      return { path, name: path.split('/').pop() ?? path, fileCount: 0 }
+    }
+  })
+
+  ipcMain.handle('tiro:link-repo', async (_event, path: string) => {
+    try {
+      return { ok: true as const, repo: await linkRepo(path) }
+    } catch (error) {
+      return fail(error)
+    }
+  })
+
+  ipcMain.handle(
+    'tiro:match-code',
+    async (_event, docId: string, repoPath: string, concepts: Concept[]) => {
+      try {
+        return { ok: true as const, matches: await matchCode(docId, repoPath, concepts) }
+      } catch (error) {
+        return fail(error)
+      }
+    },
+  )
+
+  ipcMain.handle('tiro:read-code', async (_event, repoPath: string, filePath: string) => {
+    try {
+      return { ok: true as const, file: await readCode(repoPath, filePath) }
+    } catch (error) {
+      return fail(error)
+    }
+  })
 
   ipcMain.handle('tiro:provider-state', () => providerState())
 

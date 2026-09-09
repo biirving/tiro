@@ -26,8 +26,10 @@ export interface TokenUsage {
   thinking?: number
 }
 
+export type RequestLabel = 'ask' | 'concepts' | 'code'
+
 export interface UsageEvent {
-  label: 'ask' | 'concepts'
+  label: RequestLabel
   provider: ProviderId
   model: string
   usage: TokenUsage
@@ -232,7 +234,7 @@ export function reportDocument(info: {
 
 /** Local models cost nothing, so report throughput and cache reuse instead. */
 export function reportLocalUsage(event: {
-  label: 'ask' | 'concepts'
+  label: RequestLabel
   model: string
   promptTokens: number
   evaluatedTokens: number | null

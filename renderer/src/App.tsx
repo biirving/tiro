@@ -3,6 +3,7 @@ import type {
   AskRequest,
   AskMode,
   ChatTurn,
+  CodeFile,
   Concept,
   Highlight,
   OpenedPdf,
@@ -27,6 +28,7 @@ import {
 import { applyPatch, isStreaming, neighbourOf, type DocTab, type TabPatch } from './lib/tabs'
 import { truncate, widenConceptPages } from './lib/text'
 import { AskTab } from './components/AskTab'
+import { CodeTab } from './components/CodeTab'
 import { ConceptsTab, type DeeperState } from './components/ConceptsTab'
 import { FindBar } from './components/FindBar'
 import { MarginRibbon, type RibbonTick } from './components/MarginRibbon'
@@ -158,6 +160,8 @@ export function App() {
         concepts: tab.concepts,
         highlights: tab.marks,
         chat: tab.chat,
+        repo: tab.repo,
+        codeMatches: tab.codeMatches,
       })
     }
   }, [tabs])
@@ -269,6 +273,10 @@ export function App() {
           conceptsStatus: restored.length ? 'ready' : 'idle',
           conceptsError: null,
           deeper: {},
+          repo: record.repo ?? null,
+          codeMatches: record.codeMatches ?? [],
+          codeStatus: (record.codeMatches ?? []).length > 0 ? 'ready' : 'idle',
+          codeError: null,
           marks: record.highlights,
           chat: record.chat,
           panelTab: 'concepts',
@@ -315,6 +323,8 @@ export function App() {
         concepts: tab.concepts,
         highlights: tab.marks,
         chat: tab.chat,
+        repo: tab.repo,
+        codeMatches: tab.codeMatches,
       })
       void tab.destroy()
 
@@ -536,6 +546,58 @@ export function App() {
       await attempt(true)
     },
     [patchTab, reregister, refreshProvider],
+  )
+
+  // --- code ---------------------------------------------------------------
+
+  const linkRepo = useCallback(
+    async (tabId: string) => {
+      const picked = await window.tiro.pickRepo()
+      if (!picked) return
+      const result = await window.tiro.linkRepo(picked.path)
+      if (!result.ok) {
+        patchTab(tabId, { codeStatus: 'error', codeError: result.message })
+        return
+      }
+      patchTab(tabId, {
+        repo: result.repo,
+        codeStatus: 'idle',
+        codeError: null,
+        codeMatches: [],
+      })
+    },
+    [patchTab],
+  )
+
+  const matchCode = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab?.repo || tab.concepts.length === 0) return
+
+      patchTab(tabId, { codeStatus: 'running', codeError: null })
+      const attempt = async (retry: boolean): Promise<void> => {
+        const result = await window.tiro.matchCode(tabId, tab.repo!.path, tab.concepts)
+        if (result.ok) {
+          patchTab(tabId, { codeMatches: result.matches, codeStatus: 'ready' })
+          return
+        }
+        if (result.needsDoc && retry && (await reregister(tabId))) return attempt(false)
+        if (result.needsKey) void refreshProvider()
+        patchTab(tabId, { codeStatus: 'error', codeError: result.message })
+      }
+      await attempt(true)
+    },
+    [patchTab, reregister, refreshProvider],
+  )
+
+  const readCode = useCallback(
+    async (tabId: string, filePath: string): Promise<CodeFile | null> => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab?.repo) return null
+      const result = await window.tiro.readCode(tab.repo.path, filePath)
+      return result.ok ? result.file : null
+    },
+    [],
   )
 
   const stopAsk = useCallback(
@@ -778,6 +840,7 @@ export function App() {
           onTab={(next: PanelTab) => patchTab(active.id, { panelTab: next })}
           conceptCount={active.concepts.length}
           markCount={active.marks.length}
+          codeCount={active.codeMatches.length}
         >
           {active.panelTab === 'concepts' && (
             <ConceptsTab
@@ -808,6 +871,23 @@ export function App() {
               onJump={jumpTo}
               onSettings={() => setSettingsOpen(true)}
               onClear={() => patchTab(active.id, { chat: [] })}
+            />
+          )}
+          {active.panelTab === 'code' && (
+            <CodeTab
+              repo={active.repo}
+              concepts={active.concepts}
+              matches={active.codeMatches}
+              status={active.codeStatus}
+              error={active.codeError}
+              setupMessage={setupMessage}
+              onLink={() => void linkRepo(active.id)}
+              onUnlink={() =>
+                patchTab(active.id, { repo: null, codeMatches: [], codeStatus: 'idle' })
+              }
+              onMatch={() => void matchCode(active.id)}
+              onRead={(path) => readCode(active.id, path)}
+              onSettings={() => setSettingsOpen(true)}
             />
           )}
           {active.panelTab === 'marks' && (

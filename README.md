@@ -55,6 +55,24 @@ claims, notation, and recurring entities the argument rests on. The tab opens on
 Below that, the full map: searchable, filterable by kind, with every page a
 concept appears on and a **Go deeper** answer per concept.
 
+**Code.** Link the repository for a paper and Tiro finds where each concept is
+actually implemented — file, line range, and one sentence on how the code
+corresponds to the idea. Expand any match to read the whole file with the
+matched range marked.
+
+The repository is searched **on your machine**, not sent anywhere. `git ls-files`
+gives the real source list, a regex pass extracts declarations, and concept terms
+are matched against identifiers and comments locally — `action chunk` finds
+`action_chunk`, `ActionChunk`, `chunk_size`. Only a shortlist of candidate
+snippets goes to the model, which answers with candidate *ids* rather than paths,
+so a hallucinated file is not merely unlikely but unrepresentable. Opening a full
+file costs nothing at all.
+
+That keeps a pass at roughly the cost of the concept extraction you already ran —
+the paper is read from the same cache, so only the candidate code is new. It runs
+on its own button, once per paper and repository, and is cached like the concept
+map.
+
 **The margin ribbon.** The thin strip between page and panel is a map of the
 whole document: amber ticks are your highlights, teal ticks are where concepts
 get established. Click any tick to jump.
@@ -268,6 +286,11 @@ electron/          main process — window, menu, IPC
     ollama.ts      local: native API, so num_ctx can be sized to the document
     index.ts       registry, cancellation, error translation
     usage.ts       token accounting, pricing, and the [tiro] log lines
+  repo/
+    scan.ts        git ls-files, then a regex pass for declarations
+    candidates.ts  concept terms to candidate code, locally and for free
+    match.ts       shortlist to the model; ids back, never paths
+    read.ts        one file out of a linked repo, refusing anything outside it
   docs.ts          document text, keyed by file path
   settings.ts      provider choice, model choice, encrypted keys
   preload.ts       the window's only bridge to the main process

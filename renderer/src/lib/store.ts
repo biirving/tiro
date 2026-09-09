@@ -5,7 +5,7 @@
  * reused when the same file is reopened.
  */
 
-import type { ChatTurn, Concept, Highlight } from '@shared/types'
+import type { ChatTurn, Concept, ConceptCode, Highlight, RepoLink } from '@shared/types'
 
 const DOC_PREFIX = 'tiro:doc:'
 const RECENTS_KEY = 'tiro:recents'
@@ -17,6 +17,10 @@ export interface DocRecord {
   concepts: Concept[]
   highlights: Highlight[]
   chat: ChatTurn[]
+  /** The linked repository, so it survives closing the tab. */
+  repo: RepoLink | null
+  /** Cached so a code pass, like a concept pass, is paid for once. */
+  codeMatches: ConceptCode[]
   updatedAt: number
 }
 
@@ -33,6 +37,8 @@ const empty = (title: string): DocRecord => ({
   concepts: [],
   highlights: [],
   chat: [],
+  repo: null,
+  codeMatches: [],
   updatedAt: Date.now(),
 })
 

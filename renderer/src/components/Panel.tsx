@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 export type PanelTab = 'concepts' | 'ask' | 'marks'
 
 interface PanelProps {
+  width: number
   tab: PanelTab
   onTab: (tab: PanelTab) => void
   conceptCount: number
@@ -16,12 +17,12 @@ const TABS: { id: PanelTab; label: string }[] = [
   { id: 'marks', label: 'Marks' },
 ]
 
-export function Panel({ tab, onTab, conceptCount, markCount, children }: PanelProps) {
+export function Panel({ width, tab, onTab, conceptCount, markCount, children }: PanelProps) {
   const count = (id: PanelTab): number | null =>
     id === 'concepts' ? conceptCount || null : id === 'marks' ? markCount || null : null
 
   return (
-    <aside className="panel">
+    <aside className="panel" style={{ width: `${width}px` }}>
       <nav className="tabs" role="tablist">
         {TABS.map((entry) => (
           <button

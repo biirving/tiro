@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type {
   AskRequest,
   AskMode,
@@ -11,85 +10,88 @@ import type {
 } from '@shared/types'
 import { runAsk, type RunningAsk } from './lib/ask'
 import { computeLayout, type PageSize } from './lib/layout'
-import {
-  documentTitle,
-  extractPageText,
-  openDocument,
-  pageSize,
-  readOutline,
-  type OutlineEntry,
-} from './lib/pdf'
+import { documentTitle, extractPageText, openDocument, pageSize, readOutline } from './lib/pdf'
 import { clearSelection, type PickedSelection } from './lib/selection'
 import {
+  flushRecord,
   forgetRecent,
   loadRecord,
   newId,
+  readPanelWidth,
   recents,
   rememberRecent,
-  saveRecord,
+  saveRecordSoon,
+  writePanelWidth,
   type RecentDoc,
 } from './lib/store'
+import { applyPatch, isStreaming, neighbourOf, type DocTab, type TabPatch } from './lib/tabs'
 import { truncate, widenConceptPages } from './lib/text'
 import { AskTab } from './components/AskTab'
-import { ConceptsTab, type ConceptsStatus, type DeeperState } from './components/ConceptsTab'
+import { ConceptsTab, type DeeperState } from './components/ConceptsTab'
 import { FindBar } from './components/FindBar'
 import { MarginRibbon, type RibbonTick } from './components/MarginRibbon'
 import { MarksTab } from './components/MarksTab'
 import { OutlineRail } from './components/OutlineRail'
 import { Panel, type PanelTab } from './components/Panel'
+import {
+  clampPanelWidth,
+  DEFAULT_PANEL_WIDTH,
+  PanelResizer,
+} from './components/PanelResizer'
 import { SelectionMenu } from './components/SelectionMenu'
 import { Settings } from './components/Settings'
+import { TabStrip } from './components/TabStrip'
 import { TopBar } from './components/TopBar'
 import { Viewer, type JumpRequest } from './components/Viewer'
 import { Welcome } from './components/Welcome'
 
-interface Session {
-  path: string
-  title: string
-  pdf: PDFDocumentProxy
-  numPages: number
-  sizes: PageSize[]
-  pageTexts: string[]
-  outline: OutlineEntry[]
-}
-
 const MIN_SCALE = 0.5
 const MAX_SCALE = 3
+const DEFAULT_SCALE = 1.1
 
 export function App() {
-  const [session, setSession] = useState<Session | null>(null)
+  const [tabs, setTabs] = useState<DocTab[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+
   const [busy, setBusy] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
-  const [docError, setDocError] = useState<string | null>(null)
-
   const [providerState, setProviderState] = useState<ProviderState | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(true)
-  const [tab, setTab] = useState<PanelTab>('concepts')
+  const [recentList, setRecentList] = useState<RecentDoc[]>(() => recents())
+  /** What the reader asked for. Stored unclamped; clamped only when rendering. */
+  const [preferredPanelWidth, setPreferredPanelWidth] = useState(
+    () => readPanelWidth() ?? DEFAULT_PANEL_WIDTH,
+  )
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
 
-  const [scale, setScale] = useState(1.1)
+  // Live state for whichever document is on screen. Updated every scroll frame,
+  // so it is deliberately kept out of the tab objects.
   const [page, setPage] = useState(1)
   const [metrics, setMetrics] = useState({ scrollTop: 0, viewport: 0 })
   const [jump, setJump] = useState<JumpRequest | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
-
   const [selection, setSelection] = useState<PickedSelection | null>(null)
-  const [pinned, setPinned] = useState<{ text: string; page: number } | null>(null)
 
-  const [concepts, setConcepts] = useState<Concept[]>([])
-  const [conceptsStatus, setConceptsStatus] = useState<ConceptsStatus>('idle')
-  const [conceptsError, setConceptsError] = useState<string | null>(null)
-  const [deeper, setDeeper] = useState<Record<string, DeeperState>>({})
+  /** Read inside callbacks so they never close over a stale tab list. */
+  const tabsRef = useRef<DocTab[]>([])
+  tabsRef.current = tabs
 
-  const [marks, setMarks] = useState<Highlight[]>([])
-  const [chat, setChat] = useState<ChatTurn[]>([])
-  const [recentList, setRecentList] = useState<RecentDoc[]>(() => recents())
-
-  const running = useRef<RunningAsk | null>(null)
+  /** One in-flight request per tab, so an answer survives switching away. */
+  const running = useRef(new Map<string, RunningAsk>())
+  /** Paths mid-open. Two files delivered at once must not become two tabs. */
+  const opening = useRef(new Set<string>())
   const jumpSeq = useRef(0)
+  const liveScroll = useRef(0)
+  liveScroll.current = metrics.scrollTop
 
-  /** What still has to be set up before a question can be asked, if anything. */
+  const active = tabs.find((tab) => tab.id === activeId) ?? null
+
+  const patchTab = useCallback((id: string, patch: TabPatch) => {
+    setTabs((current) => current.map((tab) => (tab.id === id ? applyPatch(tab, patch) : tab)))
+  }, [])
+
   const setupMessage = useMemo(() => {
     if (!providerState) return null
     if (providerState.ready) return null
@@ -98,36 +100,47 @@ export function App() {
     return 'Pick a model in Settings to turn this on.'
   }, [providerState])
 
+  /** The top-right control names the model it opens, rather than a glyph. */
+  const model = useMemo(() => {
+    if (!providerState || !providerState.ready) {
+      return { label: 'Model', title: 'Pick a model' }
+    }
+    return {
+      label: providerState.model,
+      title: `${providerState.provider} · ${providerState.model} — change model`,
+    }
+  }, [providerState])
+
   const layout = useMemo(
-    () => computeLayout(session?.sizes ?? [], scale),
-    [session?.sizes, scale],
+    () => computeLayout(active?.sizes ?? [], active?.scale ?? DEFAULT_SCALE),
+    [active?.sizes, active?.scale],
   )
 
   const marksByPage = useMemo(() => {
     const groups = new Map<number, Highlight[]>()
-    for (const mark of marks) {
+    for (const mark of active?.marks ?? []) {
       const list = groups.get(mark.page) ?? []
       list.push(mark)
       groups.set(mark.page, list)
     }
     return groups
-  }, [marks])
+  }, [active?.marks])
 
   const ribbon = useMemo(() => {
-    const markTicks: RibbonTick[] = marks.map((mark) => ({
+    const markTicks: RibbonTick[] = (active?.marks ?? []).map((mark) => ({
       id: mark.id,
       page: mark.page,
       within: mark.rects[0]?.y ?? 0,
       label: truncate(mark.text, 70),
     }))
-    const anchorTicks: RibbonTick[] = concepts.map((concept) => ({
+    const anchorTicks: RibbonTick[] = (active?.concepts ?? []).map((concept) => ({
       id: concept.id,
       page: concept.firstPage,
       within: 0.5,
       label: concept.term,
     }))
     return { markTicks, anchorTicks }
-  }, [marks, concepts])
+  }, [active?.marks, active?.concepts])
 
   useEffect(() => {
     void window.tiro.getProviderState().then(setProviderState)
@@ -137,11 +150,32 @@ export function App() {
     setProviderState(await window.tiro.getProviderState())
   }, [])
 
-  // Persist marks, concepts, and the conversation against this file.
+  // Persist every tab's marks, concepts, and conversation, on a delay.
   useEffect(() => {
-    if (!session) return
-    saveRecord(session.path, { title: session.title, concepts, highlights: marks, chat })
-  }, [session, concepts, marks, chat])
+    for (const tab of tabs) {
+      saveRecordSoon(tab.id, {
+        title: tab.title,
+        concepts: tab.concepts,
+        highlights: tab.marks,
+        chat: tab.chat,
+      })
+    }
+  }, [tabs])
+
+  const panelWidth = clampPanelWidth(preferredPanelWidth, viewportWidth)
+
+  const resizePanel = useCallback((width: number) => {
+    setPreferredPanelWidth(width)
+    writePanelWidth(width)
+  }, [])
+
+  // Track the window so the panel gives room back as it narrows, and takes it
+  // again as it widens.
+  useEffect(() => {
+    const onWindowResize = (): void => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', onWindowResize)
+    return () => window.removeEventListener('resize', onWindowResize)
+  }, [])
 
   useEffect(() => {
     if (!flashId) return
@@ -155,25 +189,54 @@ export function App() {
     if (flash) setFlashId(flash)
   }, [])
 
-  const registerDoc = useCallback(async (doc: Session): Promise<string | null> => {
+  // --- opening and closing ------------------------------------------------
+
+  const registerDoc = useCallback(async (tab: DocTab): Promise<string | null> => {
     const result = await window.tiro.registerDoc({
-      docId: doc.path,
-      title: doc.title,
-      pages: doc.pageTexts,
+      docId: tab.id,
+      title: tab.title,
+      pages: tab.pageTexts,
     })
     return result.ok ? null : result.message
   }, [])
 
+  /** Stores the outgoing tab's scroll position so returning to it lands right. */
+  const rememberScroll = useCallback(() => {
+    const current = activeId
+    if (current) patchTab(current, { scrollTop: liveScroll.current })
+  }, [activeId, patchTab])
+
+  const activate = useCallback(
+    (id: string) => {
+      if (id === activeId) return
+      rememberScroll()
+      setActiveId(id)
+      setSelection(null)
+      clearSelection()
+      setFindOpen(false)
+      setJump(null)
+      const tab = tabsRef.current.find((entry) => entry.id === id)
+      setPage(1)
+      setMetrics({ scrollTop: tab?.scrollTop ?? 0, viewport: metrics.viewport })
+    },
+    [activeId, rememberScroll, metrics.viewport],
+  )
+
   const openFile = useCallback(
     async (file: OpenedPdf) => {
-      running.current?.cancel()
-      running.current = null
-      setOpenError(null)
-      setDocError(null)
-      setBusy('Opening…')
+      // Already open? Just go to it rather than loading a second copy.
+      const existing = tabsRef.current.find((tab) => tab.id === file.path)
+      if (existing) {
+        activate(existing.id)
+        return
+      }
+      if (opening.current.has(file.path)) return
 
+      opening.current.add(file.path)
+      setOpenError(null)
+      setBusy('Opening…')
       try {
-        const pdf = await openDocument(file.bytes)
+        const { pdf, destroy } = await openDocument(file.bytes)
         const title = await documentTitle(pdf, file.name)
 
         const sizes: PageSize[] = []
@@ -186,48 +249,90 @@ export function App() {
         )
         const outline = await readOutline(pdf)
 
-        const next: Session = {
-          path: file.path,
-          title,
-          pdf,
-          numPages: pdf.numPages,
-          sizes,
-          pageTexts,
-          outline,
-        }
-
         const record = loadRecord(file.path, title)
         const restored = record.concepts.length
           ? widenConceptPages(record.concepts, pageTexts)
           : []
 
-        setSession(next)
-        setConcepts(restored)
-        setConceptsStatus(restored.length ? 'ready' : 'idle')
-        setConceptsError(null)
-        setDeeper({})
-        setMarks(record.highlights)
-        setChat(record.chat)
+        const tab: DocTab = {
+          id: file.path,
+          title,
+          pdf,
+          destroy,
+          numPages: pdf.numPages,
+          sizes,
+          pageTexts,
+          outline,
+          scale: DEFAULT_SCALE,
+          scrollTop: 0,
+          concepts: restored,
+          conceptsStatus: restored.length ? 'ready' : 'idle',
+          conceptsError: null,
+          deeper: {},
+          marks: record.highlights,
+          chat: record.chat,
+          panelTab: 'concepts',
+          pinned: null,
+          docError: null,
+        }
+
+        rememberScroll()
+        setTabs((current) => [...current, tab])
+        setActiveId(tab.id)
         setPage(1)
+        setMetrics({ scrollTop: 0, viewport: metrics.viewport })
         setSelection(null)
-        setPinned(null)
-        setTab('concepts')
-        jumpSeq.current += 1
-        setJump({ page: 1, seq: jumpSeq.current })
+        setJump(null)
 
         rememberRecent({ path: file.path, title, pages: pdf.numPages })
         setRecentList(recents())
 
-        setDocError(await registerDoc(next))
+        const failure = await registerDoc(tab)
+        if (failure) patchTab(tab.id, { docError: failure })
       } catch (error) {
         setOpenError(
           error instanceof Error ? error.message : 'That file could not be opened as a PDF.',
         )
       } finally {
+        opening.current.delete(file.path)
         setBusy(null)
       }
     },
-    [registerDoc],
+    [activate, rememberScroll, registerDoc, patchTab, metrics.viewport],
+  )
+
+  const closeTab = useCallback(
+    (id: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === id)
+      if (!tab) return
+
+      running.current.get(id)?.cancel()
+      running.current.delete(id)
+
+      // Get this document's work to disk before dropping it from memory.
+      flushRecord(id, {
+        title: tab.title,
+        concepts: tab.concepts,
+        highlights: tab.marks,
+        chat: tab.chat,
+      })
+      void tab.destroy()
+
+      const next = neighbourOf(tabsRef.current, id)
+      setTabs((current) => current.filter((entry) => entry.id !== id))
+
+      if (id === activeId) {
+        setActiveId(next)
+        setSelection(null)
+        clearSelection()
+        setFindOpen(false)
+        setJump(null)
+        setPage(1)
+        const following = tabsRef.current.find((entry) => entry.id === next)
+        setMetrics({ scrollTop: following?.scrollTop ?? 0, viewport: metrics.viewport })
+      }
+    },
+    [activeId, metrics.viewport],
   )
 
   const chooseFile = useCallback(async () => {
@@ -250,179 +355,210 @@ export function App() {
 
   const changeZoom = useCallback(
     (delta: number) => {
-      // Hold the reading position: remember where we are inside the current page.
+      if (!active) return
       const index = page - 1
       const within =
         layout.heights[index] > 0
           ? (metrics.scrollTop - layout.offsets[index]) / layout.heights[index]
           : 0
 
-      setScale((current) => {
-        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number((current + delta).toFixed(2))))
-        if (next !== current) jumpTo(page, Math.max(0, Math.min(1, within)))
-        return next
-      })
+      const next = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, Number((active.scale + delta).toFixed(2))),
+      )
+      if (next === active.scale) return
+      patchTab(active.id, { scale: next })
+      jumpTo(page, Math.max(0, Math.min(1, within)))
     },
-    [page, layout, metrics.scrollTop, jumpTo],
+    [active, page, layout, metrics.scrollTop, patchTab, jumpTo],
   )
 
   // --- asking -------------------------------------------------------------
 
-  const reregister = useCallback(async () => {
-    if (!session) return false
-    const failure = await registerDoc(session)
-    setDocError(failure)
-    return failure === null
-  }, [session, registerDoc])
-
-  const history = useCallback(
-    (): AskRequest['history'] =>
-      chat
-        .filter((turn) => turn.content.trim() && !turn.error)
-        .map((turn) => ({
-          role: turn.role,
-          content: turn.quote
-            ? `[from p. ${turn.quote.page}] "${turn.quote.text}"\n\n${turn.content}`
-            : turn.content,
-        })),
-    [chat],
+  const reregister = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab) return false
+      const failure = await registerDoc(tab)
+      patchTab(tabId, { docError: failure })
+      return failure === null
+    },
+    [registerDoc, patchTab],
   )
 
+  const historyFor = useCallback((tab: DocTab): AskRequest['history'] => {
+    return tab.chat
+      .filter((turn) => turn.content.trim() && !turn.error)
+      .map((turn) => ({
+        role: turn.role,
+        content: turn.quote
+          ? `[from p. ${turn.quote.page}] "${turn.quote.text}"\n\n${turn.content}`
+          : turn.content,
+      }))
+  }, [])
+
   const askInChat = useCallback(
-    (mode: AskMode, question: string, quote?: { text: string; page: number }) => {
-      if (!session) return
-      running.current?.cancel()
+    (tabId: string, mode: AskMode, question: string, quote?: { text: string; page: number }) => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab) return
+
+      running.current.get(tabId)?.cancel()
 
       const answerId = newId()
-      setTab('ask')
-      setChat((current) => [
-        ...current,
-        { id: newId(), role: 'user', content: question, quote },
-        { id: answerId, role: 'assistant', content: '', streaming: true },
-      ])
-      setPinned(null)
+      // Everything below is bound to tabId, not to whatever is active later.
+      patchTab(tabId, (current) => ({
+        panelTab: 'ask',
+        pinned: null,
+        chat: [
+          ...current.chat,
+          { id: newId(), role: 'user', content: question, quote },
+          { id: answerId, role: 'assistant', content: '', streaming: true },
+        ],
+      }))
       setSelection(null)
       clearSelection()
 
-      const patch = (change: Partial<ChatTurn>) =>
-        setChat((current) =>
-          current.map((turn) => (turn.id === answerId ? { ...turn, ...change } : turn)),
-        )
+      const patchTurn = (change: Partial<ChatTurn>) =>
+        patchTab(tabId, (current) => ({
+          chat: current.chat.map((turn) => (turn.id === answerId ? { ...turn, ...change } : turn)),
+        }))
 
-      const request: AskRequest = {
-        docId: session.path,
-        mode,
-        question,
-        selection: quote,
-        history: history(),
-      }
-
-      running.current = runAsk(
-        request,
-        {
-          onText: (chunk) =>
-            setChat((current) =>
-              current.map((turn) =>
-                turn.id === answerId ? { ...turn, content: turn.content + chunk } : turn,
-              ),
-            ),
-          onDone: () => patch({ streaming: false }),
-          onError: (message, flags) => {
-            patch({ streaming: false, error: message })
-            if (flags.needsKey) void refreshProvider()
+      running.current.set(
+        tabId,
+        runAsk(
+          {
+            docId: tabId,
+            mode,
+            question,
+            selection: quote,
+            history: historyFor(tab),
           },
-        },
-        reregister,
+          {
+            onText: (chunk) =>
+              patchTab(tabId, (current) => ({
+                chat: current.chat.map((turn) =>
+                  turn.id === answerId ? { ...turn, content: turn.content + chunk } : turn,
+                ),
+              })),
+            onDone: () => {
+              patchTurn({ streaming: false })
+              running.current.delete(tabId)
+            },
+            onError: (message, flags) => {
+              patchTurn({ streaming: false, error: message })
+              running.current.delete(tabId)
+              if (flags.needsKey) void refreshProvider()
+            },
+          },
+          () => reregister(tabId),
+        ),
       )
     },
-    [session, history, reregister, refreshProvider],
+    [patchTab, historyFor, reregister, refreshProvider],
   )
 
   const askAboutSelection = useCallback(
     (mode: 'define' | 'explain') => {
-      if (!selection) return
+      if (!selection || !active) return
       const label = mode === 'define' ? 'Define this' : 'Explain this'
-      askInChat(mode, label, { text: selection.text, page: selection.page })
+      askInChat(active.id, mode, label, { text: selection.text, page: selection.page })
     },
-    [selection, askInChat],
+    [selection, active, askInChat],
   )
 
   const goDeeper = useCallback(
-    (concept: Concept) => {
-      if (!session) return
-      running.current?.cancel()
-      setDeeper((current) => ({ ...current, [concept.id]: { text: '', streaming: true } }))
+    (tabId: string, concept: Concept) => {
+      running.current.get(tabId)?.cancel()
+      patchTab(tabId, (current) => ({
+        deeper: { ...current.deeper, [concept.id]: { text: '', streaming: true } },
+      }))
 
-      const patch = (change: Partial<DeeperState>) =>
-        setDeeper((current) => ({
-          ...current,
-          [concept.id]: { ...current[concept.id], ...change },
+      const patchDeeper = (change: Partial<DeeperState>) =>
+        patchTab(tabId, (current) => ({
+          deeper: {
+            ...current.deeper,
+            [concept.id]: { ...current.deeper[concept.id], ...change },
+          },
         }))
 
-      running.current = runAsk(
-        {
-          docId: session.path,
-          mode: 'deeper',
-          question: concept.term,
-          history: [],
-        },
-        {
-          onText: (chunk) =>
-            setDeeper((current) => ({
-              ...current,
-              [concept.id]: {
-                ...current[concept.id],
-                text: (current[concept.id]?.text ?? '') + chunk,
-              },
-            })),
-          onDone: () => patch({ streaming: false }),
-          onError: (message, flags) => {
-            patch({ streaming: false, error: message })
-            if (flags.needsKey) void refreshProvider()
+      running.current.set(
+        tabId,
+        runAsk(
+          { docId: tabId, mode: 'deeper', question: concept.term, history: [] },
+          {
+            onText: (chunk) =>
+              patchTab(tabId, (current) => ({
+                deeper: {
+                  ...current.deeper,
+                  [concept.id]: {
+                    ...current.deeper[concept.id],
+                    text: (current.deeper[concept.id]?.text ?? '') + chunk,
+                  },
+                },
+              })),
+            onDone: () => {
+              patchDeeper({ streaming: false })
+              running.current.delete(tabId)
+            },
+            onError: (message, flags) => {
+              patchDeeper({ streaming: false, error: message })
+              running.current.delete(tabId)
+              if (flags.needsKey) void refreshProvider()
+            },
           },
-        },
-        reregister,
+          () => reregister(tabId),
+        ),
       )
     },
-    [session, reregister, refreshProvider],
+    [patchTab, reregister, refreshProvider],
   )
 
-  const findConcepts = useCallback(async () => {
-    if (!session) return
-    setConceptsStatus('running')
-    setConceptsError(null)
+  const findConcepts = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab) return
+      patchTab(tabId, { conceptsStatus: 'running', conceptsError: null })
 
-    const attempt = async (retry: boolean): Promise<void> => {
-      const result = await window.tiro.concepts(session.path)
-      if (result.ok) {
-        setConcepts(widenConceptPages(result.concepts, session.pageTexts))
-        setConceptsStatus('ready')
-        return
+      const attempt = async (retry: boolean): Promise<void> => {
+        const result = await window.tiro.concepts(tabId)
+        if (result.ok) {
+          patchTab(tabId, {
+            concepts: widenConceptPages(result.concepts, tab.pageTexts),
+            conceptsStatus: 'ready',
+          })
+          return
+        }
+        if (result.needsDoc && retry && (await reregister(tabId))) return attempt(false)
+        if (result.needsKey) void refreshProvider()
+        patchTab(tabId, { conceptsError: result.message, conceptsStatus: 'error' })
       }
-      if (result.needsDoc && retry && (await reregister())) return attempt(false)
-      if (result.needsKey) void refreshProvider()
-      setConceptsError(result.message)
-      setConceptsStatus('error')
-    }
 
-    await attempt(true)
-  }, [session, reregister, refreshProvider])
+      await attempt(true)
+    },
+    [patchTab, reregister, refreshProvider],
+  )
 
-  const stopAsk = useCallback(() => {
-    running.current?.cancel()
-    running.current = null
-    setChat((current) => current.map((turn) => ({ ...turn, streaming: false })))
-    setDeeper((current) =>
-      Object.fromEntries(
-        Object.entries(current).map(([id, state]) => [id, { ...state, streaming: false }]),
-      ),
-    )
-  }, [])
+  const stopAsk = useCallback(
+    (tabId: string) => {
+      running.current.get(tabId)?.cancel()
+      running.current.delete(tabId)
+      patchTab(tabId, (current) => ({
+        chat: current.chat.map((turn) => ({ ...turn, streaming: false })),
+        deeper: Object.fromEntries(
+          Object.entries(current.deeper).map(([id, state]) => [
+            id,
+            { ...state, streaming: false },
+          ]),
+        ),
+      }))
+    },
+    [patchTab],
+  )
 
   // --- marks --------------------------------------------------------------
 
   const addMark = useCallback(() => {
-    if (!selection) return
+    if (!selection || !active) return
     const created: Highlight[] = selection.byPage.map((group) => ({
       id: newId(),
       page: group.page,
@@ -430,12 +566,23 @@ export function App() {
       rects: group.rects,
       createdAt: Date.now(),
     }))
-    setMarks((current) => [...current, ...created])
+    patchTab(active.id, (current) => ({ marks: [...current.marks, ...created] }))
     setSelection(null)
     clearSelection()
-  }, [selection])
+  }, [selection, active, patchTab])
 
   // --- menu + keys --------------------------------------------------------
+
+  const cycleTab = useCallback(
+    (delta: number) => {
+      const list = tabsRef.current
+      if (list.length < 2) return
+      const index = list.findIndex((tab) => tab.id === activeId)
+      const next = (index + delta + list.length) % list.length
+      activate(list[next].id)
+    },
+    [activeId, activate],
+  )
 
   useEffect(() => window.tiro.onOpenFile((file) => void openFile(file)), [openFile])
 
@@ -444,7 +591,17 @@ export function App() {
       window.tiro.onMenu((action) => {
         switch (action) {
           case 'open':
+          case 'new-tab':
             void chooseFile()
+            break
+          case 'close-tab':
+            if (activeId) closeTab(activeId)
+            break
+          case 'next-tab':
+            cycleTab(1)
+            break
+          case 'prev-tab':
+            cycleTab(-1)
             break
           case 'settings':
             setSettingsOpen(true)
@@ -456,19 +613,43 @@ export function App() {
             changeZoom(-0.15)
             break
           case 'zoom-reset':
-            setScale(1.1)
+            if (active) patchTab(active.id, { scale: DEFAULT_SCALE })
             break
           case 'find':
-            if (session) setFindOpen(true)
+            if (active) setFindOpen(true)
             break
         }
       }),
-    [chooseFile, changeZoom, session],
+    [chooseFile, closeTab, cycleTab, changeZoom, activeId, active, patchTab],
   )
+
+  // ⌘1…⌘9 selects a tab by position.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!event.metaKey && !event.ctrlKey) return
+      const digit = Number(event.key)
+      if (!Number.isInteger(digit) || digit < 1 || digit > 9) return
+      const target = tabsRef.current[digit - 1]
+      if (!target) return
+      event.preventDefault()
+      activate(target.id)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activate])
 
   // --- render -------------------------------------------------------------
 
-  if (!session) {
+  const settingsSheet =
+    settingsOpen && providerState ? (
+      <Settings
+        state={providerState}
+        onState={setProviderState}
+        onClose={() => setSettingsOpen(false)}
+      />
+    ) : null
+
+  if (!active) {
     return (
       <div className="app">
         <div className="titlebar-drag" />
@@ -485,44 +666,41 @@ export function App() {
           }}
           onSettings={() => setSettingsOpen(true)}
         />
-        {settingsOpen && providerState && (
-          <Settings
-            state={providerState}
-            onState={setProviderState}
-            onClose={() => setSettingsOpen(false)}
-          />
-        )}
+        {settingsSheet}
       </div>
     )
   }
 
-  const streaming =
-    chat.some((turn) => turn.streaming) ||
-    Object.values(deeper).some((state) => state.streaming)
-
   return (
     <div className="app">
-      <div className="titlebar-drag" />
+      <TabStrip
+        tabs={tabs}
+        activeId={activeId}
+        onSelect={activate}
+        onClose={closeTab}
+        onNew={() => void chooseFile()}
+      />
       <TopBar
-        title={session.title}
         page={page}
-        numPages={session.numPages}
-        scale={scale}
+        numPages={active.numPages}
+        scale={active.scale}
         railOpen={railOpen}
         onToggleRail={() => setRailOpen((open) => !open)}
         onJump={jumpTo}
         onZoom={changeZoom}
-        onZoomReset={() => setScale(1.1)}
+        onZoomReset={() => patchTab(active.id, { scale: DEFAULT_SCALE })}
         onOpen={() => void chooseFile()}
         onSettings={() => setSettingsOpen(true)}
+        modelLabel={model.label}
+        modelTitle={model.title}
         needsSetup={Boolean(setupMessage)}
       />
 
       <main className="workspace">
         {railOpen && (
           <OutlineRail
-            outline={session.outline}
-            numPages={session.numPages}
+            outline={active.outline}
+            numPages={active.numPages}
             currentPage={page}
             onJump={jumpTo}
           />
@@ -543,28 +721,34 @@ export function App() {
               </button>
             </p>
           )}
-          {docError && (
+          {active.docError && (
             <p className="banner">
-              {docError}{' '}
-              <button type="button" className="banner-action" onClick={() => void reregister()}>
+              {active.docError}{' '}
+              <button
+                type="button"
+                className="banner-action"
+                onClick={() => void reregister(active.id)}
+              >
                 Retry
               </button>
             </p>
           )}
           {findOpen && (
             <FindBar
-              pageTexts={session.pageTexts}
+              pageTexts={active.pageTexts}
               onJump={jumpTo}
               onClose={() => setFindOpen(false)}
             />
           )}
           <Viewer
-            pdf={session.pdf}
+            key={active.id}
+            pdf={active.pdf}
             layout={layout}
-            scale={scale}
+            scale={active.scale}
             highlightsByPage={marksByPage}
             flashId={flashId}
             jump={jump}
+            initialScrollTop={active.scrollTop}
             scrollTop={metrics.scrollTop}
             viewport={metrics.viewport}
             onPageChange={setPage}
@@ -582,45 +766,65 @@ export function App() {
           onJump={jumpTo}
         />
 
-        <Panel tab={tab} onTab={setTab} conceptCount={concepts.length} markCount={marks.length}>
-          {tab === 'concepts' && (
+        <PanelResizer
+          width={panelWidth}
+          onResize={resizePanel}
+          onReset={() => resizePanel(DEFAULT_PANEL_WIDTH)}
+        />
+
+        <Panel
+          width={panelWidth}
+          tab={active.panelTab}
+          onTab={(next: PanelTab) => patchTab(active.id, { panelTab: next })}
+          conceptCount={active.concepts.length}
+          markCount={active.marks.length}
+        >
+          {active.panelTab === 'concepts' && (
             <ConceptsTab
-              status={conceptsStatus}
-              error={conceptsError}
-              concepts={concepts}
+              status={active.conceptsStatus}
+              error={active.conceptsError}
+              concepts={active.concepts}
               currentPage={page}
-              numPages={session.numPages}
-              deeper={deeper}
+              numPages={active.numPages}
+              deeper={active.deeper}
               setupMessage={setupMessage}
-              onExtract={() => void findConcepts()}
+              onExtract={() => void findConcepts(active.id)}
               onJump={jumpTo}
-              onDeeper={goDeeper}
+              onDeeper={(concept) => goDeeper(active.id, concept)}
               onSettings={() => setSettingsOpen(true)}
             />
           )}
-          {tab === 'ask' && (
+          {active.panelTab === 'ask' && (
             <AskTab
-              chat={chat}
-              selection={pinned}
+              chat={active.chat}
+              selection={active.pinned}
               setupMessage={setupMessage}
-              streaming={streaming}
-              onSend={(question) => askInChat('chat', question, pinned ?? undefined)}
-              onStop={stopAsk}
-              onClearSelection={() => setPinned(null)}
+              streaming={isStreaming(active)}
+              onSend={(question) =>
+                askInChat(active.id, 'chat', question, active.pinned ?? undefined)
+              }
+              onStop={() => stopAsk(active.id)}
+              onClearSelection={() => patchTab(active.id, { pinned: null })}
               onJump={jumpTo}
               onSettings={() => setSettingsOpen(true)}
-              onClear={() => setChat([])}
+              onClear={() => patchTab(active.id, { chat: [] })}
             />
           )}
-          {tab === 'marks' && (
+          {active.panelTab === 'marks' && (
             <MarksTab
-              marks={marks}
+              marks={active.marks}
               onJump={jumpTo}
-              onRemove={(id) => setMarks((current) => current.filter((m) => m.id !== id))}
-              onAsk={(mark) => {
-                setPinned({ text: mark.text, page: mark.page })
-                setTab('ask')
-              }}
+              onRemove={(id) =>
+                patchTab(active.id, (current) => ({
+                  marks: current.marks.filter((mark) => mark.id !== id),
+                }))
+              }
+              onAsk={(mark) =>
+                patchTab(active.id, {
+                  pinned: { text: mark.text, page: mark.page },
+                  panelTab: 'ask',
+                })
+              }
             />
           )}
         </Panel>
@@ -633,22 +837,17 @@ export function App() {
           onDefine={() => askAboutSelection('define')}
           onExplain={() => askAboutSelection('explain')}
           onAsk={() => {
-            setPinned({ text: selection.text, page: selection.page })
-            setTab('ask')
+            patchTab(active.id, {
+              pinned: { text: selection.text, page: selection.page },
+              panelTab: 'ask',
+            })
             setSelection(null)
             clearSelection()
           }}
         />
       )}
 
-      {settingsOpen && providerState && (
-        <Settings
-          state={providerState}
-          onState={setProviderState}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
+      {settingsSheet}
     </div>
   )
-
 }

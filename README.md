@@ -6,11 +6,31 @@ Open a paper, read it, select anything and ask. Claude reads all of it once and
 builds a concept map, so the term defined on page 4 is one click away when it
 reappears on page 40 — instead of a scroll back through the parts you skimmed.
 
+![Tiro's opening screen](docs/welcome.png)
+
 ## What it does
+
+**Read several papers at once.** Each open PDF is a tab, and each tab keeps its
+own zoom, scroll position, concept map, marks, and conversation — switching back
+puts you where you left off rather than resetting. An answer still arriving in a
+background tab shows a live dot on that tab and lands there, not wherever you
+happen to be looking.
+
+![Two papers open, with a highlight on the page and its tick in the margin ribbon](docs/reading.png)
+
+The document's own table of contents is on the left. Your highlights sit on the
+page in amber and as ticks in the thin ribbon between the page and the panel.
 
 **Read.** Continuous scroll, real text selection, the document's own table of
 contents in the left rail, `⌘F` search across every page at once with jump-to
-results.
+results. Drag the edge between the page and the panel to give either one more
+room; double-click that edge to reset it. The width is remembered.
+
+![Find in document, showing every match across the paper with page numbers](docs/find.png)
+
+Find searches the text pdf.js already extracted, so it costs nothing and covers
+every page at once — matches come back grouped by page with the surrounding
+sentence, and clicking one jumps there.
 
 **Select and ask.** Select a passage and the bar offers four things:
 
@@ -222,6 +242,11 @@ refused with both numbers in the message.
 | | |
 |---|---|
 | `⌘O` / `Ctrl+O` | Open a PDF |
+| `⌘T` | Open another PDF in a new tab |
+| `⌘1`…`⌘9` | Jump to a tab by position |
+| `⌘⇧]` / `⌘⇧[` | Next / previous tab |
+| `⌘W` | Close tab |
+| `⌘⇧W` | Close window |
 | `⌘F` / `Ctrl+F` | Find in document |
 | `⌘,` / `Ctrl+,` | Settings |
 | `⌘+` / `⌘-` | Zoom |
@@ -229,7 +254,8 @@ refused with both numbers in the message.
 
 Double-clicking a PDF opens it in Tiro once the app is installed — Finder on
 macOS, or any file manager on Linux via the `.deb`. From a shell,
-`open -a Tiro paper.pdf` on macOS and `tiro paper.pdf` on Linux both work.
+`open -a Tiro paper.pdf` on macOS and `tiro paper.pdf` on Linux both work, and
+several paths at once open as several tabs.
 
 ## Layout
 
@@ -251,6 +277,7 @@ renderer/src/
   lib/pdf.ts       pdf.js: open, render, extract text, read the outline
   lib/selection.ts browser selection to storable, zoom-independent marks
   lib/layout.ts    page geometry for the scroll column and the ribbon
+  lib/tabs.ts      one open document: its own view state, marks, and chat
   lib/text.ts      concept-to-page matching, LaTeX and citation parsing
   components/      viewer, panel tabs, ribbon, chrome
 ```

@@ -29,9 +29,20 @@ export interface OutlineEntry {
   depth: number
 }
 
-export async function openDocument(bytes: Uint8Array): Promise<PDFDocumentProxy> {
+export interface OpenedDocument {
+  pdf: PDFDocumentProxy
+  /**
+   * Releases this document's worker resources. Lives on the loading task, not
+   * the document, which is why the task is kept rather than discarded.
+   */
+  destroy: () => Promise<void>
+}
+
+export async function openDocument(bytes: Uint8Array): Promise<OpenedDocument> {
   // pdf.js takes ownership of the buffer, so hand it a copy we don't reuse.
-  return getDocument({ data: bytes, ...ASSETS }).promise
+  const task = getDocument({ data: bytes, ...ASSETS })
+  const pdf = await task.promise
+  return { pdf, destroy: () => task.destroy() }
 }
 
 /** A readable title: the PDF's own metadata title if it has a real one, else the filename. */

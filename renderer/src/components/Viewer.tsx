@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { Highlight } from '@shared/types'
 import { pickSelection, type PickedSelection } from '@/lib/selection'
@@ -23,6 +23,8 @@ interface ViewerProps {
   highlightsByPage: Map<number, Highlight[]>
   flashId: string | null
   jump: JumpRequest | null
+  /** Where this document was left, applied once on mount. */
+  initialScrollTop: number
   /** Scroll state lives in App so the margin ribbon and the viewer agree on it. */
   scrollTop: number
   viewport: number
@@ -38,6 +40,7 @@ export function Viewer({
   highlightsByPage,
   flashId,
   jump,
+  initialScrollTop,
   scrollTop,
   viewport,
   onPageChange,
@@ -70,6 +73,14 @@ export function Viewer({
       measure()
     })
   }, [measure])
+
+  // Put the reader back where they were in this document before anything paints.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && initialScrollTop > 0) el.scrollTop = initialScrollTop
+    // Deliberately mount-only: later scrolling must not be overridden.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Re-measure when the layout changes under us (zoom, window resize, new file).
   useEffect(() => {

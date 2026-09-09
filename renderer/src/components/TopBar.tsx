@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 
 interface TopBarProps {
-  title: string
   page: number
   numPages: number
   scale: number
@@ -12,11 +11,13 @@ interface TopBarProps {
   onZoomReset: () => void
   onOpen: () => void
   onSettings: () => void
+  /** The active model, or "Model" when none is picked yet. */
+  modelLabel: string
+  modelTitle: string
   needsSetup: boolean
 }
 
 export function TopBar({
-  title,
   page,
   numPages,
   scale,
@@ -27,6 +28,8 @@ export function TopBar({
   onZoomReset,
   onOpen,
   onSettings,
+  modelLabel,
+  modelTitle,
   needsSetup,
 }: TopBarProps) {
   const [draft, setDraft] = useState(String(page))
@@ -53,9 +56,6 @@ export function TopBar({
             <path d="M2 3.5h12M2 8h12M2 12.5h7" stroke="currentColor" strokeWidth="1.4" fill="none" />
           </svg>
         </button>
-        <h1 className="topbar-title" title={title}>
-          {title}
-        </h1>
       </div>
 
       <div className="topbar-center">
@@ -104,19 +104,11 @@ export function TopBar({
         </button>
         <button
           type="button"
-          className={`icon-button${needsSetup ? ' needs-attention' : ''}`}
+          className={`text-button model-button${needsSetup ? ' needs-attention' : ''}`}
           onClick={onSettings}
-          title={needsSetup ? 'Pick a model' : 'Settings'}
+          title={modelTitle}
         >
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
-            <circle cx="8" cy="8" r="2.4" stroke="currentColor" strokeWidth="1.3" fill="none" />
-            <path
-              d="M8 1.6v1.7M8 12.7v1.7M1.6 8h1.7M12.7 8h1.7M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              fill="none"
-            />
-          </svg>
+          {modelLabel}
         </button>
       </div>
     </header>

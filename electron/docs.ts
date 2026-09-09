@@ -22,7 +22,8 @@ export interface StoredDoc {
   storedAt: number
 }
 
-const MAX_DOCS = 8
+/** Comfortably more than anyone keeps open; eviction is still handled. */
+const MAX_DOCS = 16
 
 /** Claude accepts 1M tokens; stop short of it and say so rather than truncating. */
 const MAX_CHARS = 2_400_000

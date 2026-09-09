@@ -38,7 +38,7 @@
   --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
   --serif: 'IBM Plex Serif', ui-serif, Georgia, serif;
 
-  --topbar-h: 46px;
+  --topbar-h: 42px;
   color-scheme: dark;
 }
 
@@ -105,12 +105,12 @@ textarea {
 
 /* Only macOS hides its title bar behind the app, so only it needs the gutter. */
 :root[data-platform='darwin'] .titlebar-drag,
-:root[data-platform='darwin'] .topbar {
+:root[data-platform='darwin'] .tabstrip {
   -webkit-app-region: drag;
 }
 
-:root[data-platform='darwin'] .topbar {
-  padding-left: 86px;
+:root[data-platform='darwin'] .tabstrip {
+  padding-left: 84px;
 }
 
 .workspace {
@@ -134,8 +134,7 @@ textarea {
   border-bottom: 1px solid var(--rule-soft);
 }
 
-.topbar button,
-.topbar input {
+.tabstrip button {
   -webkit-app-region: no-drag;
 }
 
@@ -207,6 +206,24 @@ textarea {
   background: var(--raised);
 }
 
+.model-button {
+  max-width: 190px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.model-button.needs-attention {
+  color: var(--amber);
+}
+
+.model-button.needs-attention:hover {
+  color: var(--amber-bright);
+}
+
 .pager,
 .zoomer {
   display: flex;
@@ -257,6 +274,142 @@ textarea {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
+}
+
+/* ---------- tab strip ---------- */
+
+.tabstrip {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: stretch;
+  height: 38px;
+  padding: 0 6px;
+  background: var(--ink);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.tabstrip-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabstrip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.doctab {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 230px;
+  margin: 5px 0;
+  padding-right: 2px;
+  border-radius: 6px;
+  border-top: 2px solid transparent;
+  color: var(--muted);
+  transition: background 120ms, color 120ms;
+}
+
+.doctab:hover {
+  background: var(--chrome);
+  color: var(--text-2);
+}
+
+.doctab.is-active {
+  background: var(--chrome);
+  border-top-color: var(--teal);
+  color: var(--text);
+}
+
+.doctab-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  padding: 4px 4px 4px 10px;
+  text-align: left;
+}
+
+.doctab-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+/* An answer still arriving in a tab you are not looking at. */
+.doctab-live {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.doctab-index {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted-dim);
+  opacity: 0;
+}
+
+.doctab:hover .doctab-index {
+  opacity: 1;
+}
+
+.doctab-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--muted-dim);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.doctab:hover .doctab-close,
+.doctab.is-active .doctab-close {
+  opacity: 1;
+}
+
+.doctab-close:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.tabstrip-new {
+  flex: none;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 4px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.tabstrip-new:hover {
+  background: var(--chrome);
+  color: var(--text);
 }
 
 /* ---------- outline rail ---------- */
@@ -716,13 +869,46 @@ textarea {
 
 /* ---------- panel ---------- */
 
+.panel-resizer {
+  flex: none;
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: var(--chrome);
+  border-right: 1px solid var(--rule-soft);
+}
+
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after,
+body.is-resizing .panel-resizer::after {
+  background: var(--teal);
+}
+
+.panel-resizer:focus-visible {
+  outline: none;
+}
+
+/* Keep a drag from selecting the page text it passes over. */
+body.is-resizing,
+body.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 .panel {
   display: flex;
   flex-direction: column;
-  width: 396px;
   flex: none;
   background: var(--chrome);
-  border-left: 1px solid var(--rule-soft);
 }
 
 .tabs {
@@ -2035,12 +2221,6 @@ textarea {
 }
 
 /* ---------- narrow windows ---------- */
-
-@media (max-width: 1240px) {
-  .panel {
-    width: 344px;
-  }
-}
 
 @media (max-width: 1080px) {
   .rail {

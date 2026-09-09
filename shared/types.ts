@@ -141,4 +141,14 @@ export interface TiroBridge {
   platform: string
 }
 
-export type MenuAction = 'open' | 'settings' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'find'
+export type MenuAction =
+  | 'open'
+  | 'new-tab'
+  | 'close-tab'
+  | 'next-tab'
+  | 'prev-tab'
+  | 'settings'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
+  | 'find'

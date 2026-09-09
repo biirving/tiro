@@ -53,8 +53,8 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let mainWindow: BrowserWindow | null = null
-/** A PDF opened from Finder before the window was ready. */
-let queuedFile: string | null = null
+/** PDFs handed to us before the window was ready. */
+let queuedFiles: string[] = []
 
 const CSP =
   "default-src 'self'; " +
@@ -110,19 +110,16 @@ async function openViaDialog(): Promise<OpenedPdf | null> {
 /** Hands a PDF opened from Finder or the dock to the renderer. */
 async function deliverFile(path: string): Promise<void> {
   if (!mainWindow) {
-    queuedFile = path
+    queuedFiles.push(path)
     return
   }
   const file = await readPdf(path)
   if (file) mainWindow.webContents.send('tiro:open-file', file)
 }
 
-/** Supports `open -a Tiro paper.pdf` and a path passed on the command line. */
-function pdfFromArgv(argv: string[]): string | null {
-  const path = argv
-    .slice(1)
-    .find((arg) => arg.toLowerCase().endsWith('.pdf') && existsSync(arg))
-  return path ?? null
+/** Supports `tiro a.pdf b.pdf`, opening each as its own tab. */
+function pdfsFromArgv(argv: string[]): string[] {
+  return argv.slice(1).filter((arg) => arg.toLowerCase().endsWith('.pdf') && existsSync(arg))
 }
 
 function buildMenu(): void {
@@ -157,19 +154,24 @@ function buildMenu(): void {
       label: 'File',
       submenu: [
         { label: 'Open PDF…', accelerator: 'CmdOrCtrl+O', click: () => sendMenu('open') },
+        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => sendMenu('new-tab') },
         { type: 'separator' },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => sendMenu('close-tab') },
+        // ⌘W belongs to the tab now, so the window moves to ⌘⇧W.
+        isMac
+          ? { role: 'close', label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W' }
+          : { role: 'quit' },
         // Settings lives in the app menu on macOS and here everywhere else.
         ...(isMac
           ? []
           : ([
+              { type: 'separator' },
               {
                 label: 'Settings…',
                 accelerator: 'CmdOrCtrl+,',
                 click: () => sendMenu('settings'),
               },
-              { type: 'separator' },
             ] as Electron.MenuItemConstructorOptions[])),
-        isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },
     { role: 'editMenu' },
@@ -188,7 +190,27 @@ function buildMenu(): void {
           : []),
       ],
     },
-    { role: 'windowMenu' },
+    {
+      label: 'Window',
+      submenu: [
+        {
+          label: 'Next Tab',
+          accelerator: 'CmdOrCtrl+Shift+]',
+          click: () => sendMenu('next-tab'),
+        },
+        {
+          label: 'Previous Tab',
+          accelerator: 'CmdOrCtrl+Shift+[',
+          click: () => sendMenu('prev-tab'),
+        },
+        { type: 'separator' },
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac
+          ? ([{ type: 'separator' }, { role: 'front' }] as Electron.MenuItemConstructorOptions[])
+          : []),
+      ],
+    },
     {
       role: 'help',
       submenu: [
@@ -225,10 +247,13 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
-    if (queuedFile) {
-      void deliverFile(queuedFile)
-      queuedFile = null
-    }
+    const queued = queuedFiles
+    queuedFiles = []
+    // Sequential so the renderer builds the tabs in the order given.
+    void queued.reduce<Promise<void>>(
+      (chain, path) => chain.then(() => deliverFile(path)),
+      Promise.resolve(),
+    )
   })
 
   // If `ready-to-show` never arrives, show the window anyway. A blank frame with
@@ -389,8 +414,7 @@ if (!app.requestSingleInstanceLock()) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
     }
-    const path = pdfFromArgv(argv)
-    if (path) void deliverFile(path)
+    for (const path of pdfsFromArgv(argv)) void deliverFile(path)
   })
 
   // Fires before `ready` when the app is launched by double-clicking a PDF.
@@ -408,8 +432,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     buildMenu()
 
-    const fromArgv = pdfFromArgv(process.argv)
-    if (fromArgv) queuedFile = fromArgv
+    queuedFiles = pdfsFromArgv(process.argv)
     createWindow()
 
     app.on('activate', () => {

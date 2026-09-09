@@ -41,13 +41,19 @@ function TeX({ tex, display }: TeXProps) {
   )
 }
 
+export interface CodeRefHandler {
+  (path: string, from: number, to: number): void
+}
+
 interface RichTextProps {
   text: string
   onJump: (page: number) => void
+  /** Set when a repository is linked, making code citations openable. */
+  onOpenCode?: CodeRefHandler
 }
 
 /** One line of model output: math, page citations, and light emphasis. */
-export function RichText({ text, onJump }: RichTextProps) {
+export function RichText({ text, onJump, onOpenCode }: RichTextProps) {
   const runs = useMemo(() => parseInline(text), [text])
 
   return (
@@ -62,6 +68,22 @@ export function RichText({ text, onJump }: RichTextProps) {
             return (
               <code key={i} className="prose-code">
                 {run.text}
+              </code>
+            )
+          case 'code-ref':
+            return onOpenCode ? (
+              <button
+                key={i}
+                type="button"
+                className="code-ref"
+                onClick={() => onOpenCode(run.path, run.from, run.to)}
+                title={`Open ${run.path}`}
+              >
+                {run.label}
+              </button>
+            ) : (
+              <code key={i} className="prose-code">
+                {run.label}
               </code>
             )
           case 'math':
@@ -89,10 +111,11 @@ export function RichText({ text, onJump }: RichTextProps) {
 interface ProseProps {
   text: string
   onJump: (page: number) => void
+  onOpenCode?: CodeRefHandler
 }
 
 /** A whole answer: paragraphs, the occasional list, display equations. */
-export function Prose({ text, onJump }: ProseProps) {
+export function Prose({ text, onJump, onOpenCode }: ProseProps) {
   const blocks = useMemo(() => parseBlocks(text), [text])
 
   return (
@@ -102,7 +125,7 @@ export function Prose({ text, onJump }: ProseProps) {
           case 'heading':
             return (
               <h4 key={i}>
-                <RichText text={block.text} onJump={onJump} />
+                <RichText text={block.text} onJump={onJump} onOpenCode={onOpenCode} />
               </h4>
             )
           case 'math':
@@ -116,7 +139,7 @@ export function Prose({ text, onJump }: ProseProps) {
               <ul key={i}>
                 {block.items.map((item, j) => (
                   <li key={j}>
-                    <RichText text={item} onJump={onJump} />
+                    <RichText text={item} onJump={onJump} onOpenCode={onOpenCode} />
                   </li>
                 ))}
               </ul>
@@ -126,7 +149,7 @@ export function Prose({ text, onJump }: ProseProps) {
               <ol key={i}>
                 {block.items.map((item, j) => (
                   <li key={j}>
-                    <RichText text={item} onJump={onJump} />
+                    <RichText text={item} onJump={onJump} onOpenCode={onOpenCode} />
                   </li>
                 ))}
               </ol>
@@ -134,7 +157,7 @@ export function Prose({ text, onJump }: ProseProps) {
           case 'para':
             return (
               <p key={i}>
-                <RichText text={block.lines.join(' ')} onJump={onJump} />
+                <RichText text={block.lines.join(' ')} onJump={onJump} onOpenCode={onOpenCode} />
               </p>
             )
         }

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CodeFile, CodeLocation, Concept, ConceptCode, RepoLink } from '@shared/types'
+import { useMemo, useState } from 'react'
+import type { CodeLocation, Concept, ConceptCode, RepoLink } from '@shared/types'
 
 export type CodeStatus = 'idle' | 'running' | 'ready' | 'error'
 
@@ -13,7 +13,8 @@ interface CodeTabProps {
   onLink: () => void
   onUnlink: () => void
   onMatch: () => void
-  onRead: (path: string) => Promise<CodeFile | null>
+  /** Opens the file full width, above the app. */
+  onExpand: (location: CodeLocation) => Promise<void>
   onSettings: () => void
 }
 
@@ -27,7 +28,7 @@ export function CodeTab({
   onLink,
   onUnlink,
   onMatch,
-  onRead,
+  onExpand,
   onSettings,
 }: CodeTabProps) {
   const byConcept = useMemo(() => {
@@ -139,7 +140,7 @@ export function CodeTab({
                   key={concept.id}
                   concept={concept}
                   locations={byConcept.get(concept.id) ?? []}
-                  onRead={onRead}
+                  onExpand={onExpand}
                 />
               ))}
             </ul>
@@ -158,15 +159,19 @@ export function CodeTab({
 interface ConceptCodeRowProps {
   concept: Concept
   locations: CodeLocation[]
-  onRead: (path: string) => Promise<CodeFile | null>
+  onExpand: (location: CodeLocation) => Promise<void>
 }
 
-function ConceptCodeRow({ concept, locations, onRead }: ConceptCodeRowProps) {
+function ConceptCodeRow({ concept, locations, onExpand }: ConceptCodeRowProps) {
   return (
     <li className="code-concept">
       <p className="code-concept-term">{concept.term}</p>
       {locations.map((location, i) => (
-        <LocationCard key={`${location.path}-${location.startLine}-${i}`} location={location} onRead={onRead} />
+        <LocationCard
+          key={`${location.path}-${location.startLine}-${i}`}
+          location={location}
+          onExpand={onExpand}
+        />
       ))}
     </li>
   )
@@ -174,25 +179,16 @@ function ConceptCodeRow({ concept, locations, onRead }: ConceptCodeRowProps) {
 
 interface LocationCardProps {
   location: CodeLocation
-  onRead: (path: string) => Promise<CodeFile | null>
+  onExpand: (location: CodeLocation) => Promise<void>
 }
 
-function LocationCard({ location, onRead }: LocationCardProps) {
-  const [file, setFile] = useState<CodeFile | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [failed, setFailed] = useState<string | null>(null)
+function LocationCard({ location, onExpand }: LocationCardProps) {
+  const [opening, setOpening] = useState(false)
 
-  const expand = async (): Promise<void> => {
-    if (file) {
-      setFile(null)
-      return
-    }
-    setLoading(true)
-    setFailed(null)
-    const read = await onRead(location.path)
-    setLoading(false)
-    if (read) setFile(read)
-    else setFailed('That file could not be read.')
+  const open = async (): Promise<void> => {
+    setOpening(true)
+    await onExpand(location)
+    setOpening(false)
   }
 
   return (
@@ -208,60 +204,13 @@ function LocationCard({ location, onRead }: LocationCardProps) {
       {location.symbol && <span className="code-symbol">{location.symbol}</span>}
       <p className="code-reason">{location.reason}</p>
 
-      {file ? (
-        <FileView file={file} from={location.startLine} to={location.endLine} />
-      ) : (
-        <pre className="code-snippet">
-          <code>{location.snippet}</code>
-        </pre>
-      )}
+      <pre className="code-snippet">
+        <code>{location.snippet}</code>
+      </pre>
 
-      {failed && <p className="panel-error">{failed}</p>}
-
-      <button type="button" className="button-ghost" onClick={() => void expand()} disabled={loading}>
-        {loading ? 'Opening…' : file ? 'Collapse to snippet' : 'Open whole file'}
+      <button type="button" className="button-ghost" onClick={() => void open()} disabled={opening}>
+        {opening ? 'Opening…' : 'Open whole file'}
       </button>
-    </div>
-  )
-}
-
-interface FileViewProps {
-  file: CodeFile
-  from: number
-  to: number
-}
-
-/** The whole file, with the matched range marked and scrolled into view. */
-function FileView({ file, from, to }: FileViewProps) {
-  const lines = useMemo(() => file.content.split('\n'), [file.content])
-  const boxRef = useRef<HTMLDivElement | null>(null)
-  const markRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    const box = boxRef.current
-    const mark = markRef.current
-    if (!box || !mark) return
-    // Put the match a little below the top rather than flush against it.
-    box.scrollTop = Math.max(0, mark.offsetTop - box.clientHeight / 3)
-  }, [file.path, from])
-
-  return (
-    <div className="code-file" ref={boxRef}>
-      {lines.map((line, i) => {
-        const number = i + 1
-        const inRange = number >= from && number <= to
-        return (
-          <div
-            key={number}
-            ref={number === from ? markRef : undefined}
-            className={`code-line${inRange ? ' is-match' : ''}`}
-          >
-            <span className="code-ln">{number}</span>
-            <span className="code-src">{line || ' '}</span>
-          </div>
-        )
-      })}
-      {file.truncated && <p className="code-truncated">File truncated at {lines.length} lines.</p>}
     </div>
   )
 }

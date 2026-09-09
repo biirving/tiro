@@ -62,8 +62,9 @@ concept appears on and a **Go deeper** answer per concept.
 
 **Code.** Link the repository for a paper and Tiro finds where each concept is
 actually implemented — file, line range, and one sentence on how the code
-corresponds to the idea. Expand any match to read the whole file with the
-matched range marked.
+corresponds to the idea. Open any match and the file fills the window, with the
+matched range marked and scrolled to; a sidebar is the wrong shape for reading
+code. Escape closes it.
 
 The repository is searched **on your machine**, not sent anywhere. `git ls-files`
 gives the real source list, a regex pass extracts declarations, and concept terms
@@ -77,6 +78,9 @@ file costs nothing at all.
 and read it while answering — "is the chunk size in the paper the default here?",
 "where does this loss actually get computed?". The answer shows what it looked
 up before replying.
+
+Any `path:line` it cites is a link that opens that file in the same full-width
+reader, at that line.
 
 This is not filesystem access. The model gets three read-only tools —
 `search_code`, `read_file`, `list_files` — answered entirely from the in-memory

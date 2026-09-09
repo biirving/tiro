@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Concept, ConceptKind } from '@shared/types'
 import { conceptsForPage } from '@/lib/text'
-import { Prose, RichText } from './Prose'
+import { Prose, RichText, type CodeRefHandler } from './Prose'
 
 export interface DeeperState {
   text: string
@@ -23,6 +23,7 @@ interface ConceptsTabProps {
   onExtract: () => void
   onJump: (page: number) => void
   onDeeper: (concept: Concept) => void
+  onOpenCode?: CodeRefHandler
   onSettings: () => void
 }
 
@@ -47,6 +48,7 @@ export function ConceptsTab({
   onExtract,
   onJump,
   onDeeper,
+  onOpenCode,
   onSettings,
 }: ConceptsTabProps) {
   const [query, setQuery] = useState('')
@@ -230,6 +232,7 @@ export function ConceptsTab({
             open={openId === concept.id}
             deeper={deeper[concept.id]}
             deeperBlocked={setupMessage}
+            onOpenCode={onOpenCode}
             onToggle={() => setOpenId((id) => (id === concept.id ? null : concept.id))}
             onJump={onJump}
             onDeeper={() => onDeeper(concept)}
@@ -247,6 +250,7 @@ interface ConceptCardProps {
   deeper: DeeperState | undefined
   /** Non-null when no model is configured, so going deeper is unavailable. */
   deeperBlocked: string | null
+  onOpenCode?: CodeRefHandler
   onToggle: () => void
   onJump: (page: number) => void
   onDeeper: () => void
@@ -257,6 +261,7 @@ function ConceptCard({
   open,
   deeper,
   deeperBlocked,
+  onOpenCode,
   onToggle,
   onJump,
   onDeeper,
@@ -303,7 +308,7 @@ function ConceptCard({
 
           {deeper?.text ? (
             <div className="concept-deeper">
-              <Prose text={deeper.text} onJump={onJump} />
+              <Prose text={deeper.text} onJump={onJump} onOpenCode={onOpenCode} />
               {deeper.streaming && <span className="caret" aria-hidden />}
             </div>
           ) : null}

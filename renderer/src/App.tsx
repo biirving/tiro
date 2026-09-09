@@ -3,7 +3,6 @@ import type {
   AskRequest,
   AskMode,
   ChatTurn,
-  CodeFile,
   Concept,
   Highlight,
   OpenedPdf,
@@ -29,6 +28,7 @@ import { applyPatch, isStreaming, neighbourOf, type DocTab, type TabPatch } from
 import { truncate, widenConceptPages } from './lib/text'
 import { AskTab } from './components/AskTab'
 import { CodeTab } from './components/CodeTab'
+import { CodeModal, type CodeView } from './components/CodeModal'
 import { ConceptsTab, type DeeperState } from './components/ConceptsTab'
 import { FindBar } from './components/FindBar'
 import { MarginRibbon, type RibbonTick } from './components/MarginRibbon'
@@ -75,6 +75,8 @@ export function App() {
   const [jump, setJump] = useState<JumpRequest | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
   const [selection, setSelection] = useState<PickedSelection | null>(null)
+  /** A source file open above everything, where it can actually be read. */
+  const [codeView, setCodeView] = useState<CodeView | null>(null)
 
   /** Read inside callbacks so they never close over a stale tab list. */
   const tabsRef = useRef<DocTab[]>([])
@@ -599,12 +601,16 @@ export function App() {
     [patchTab, reregister, refreshProvider],
   )
 
-  const readCode = useCallback(
-    async (tabId: string, filePath: string): Promise<CodeFile | null> => {
+  const openCode = useCallback(
+    async (tabId: string, path: string, from: number, to: number, note?: string) => {
       const tab = tabsRef.current.find((entry) => entry.id === tabId)
-      if (!tab?.repo) return null
-      const result = await window.tiro.readCode(tab.repo.path, filePath)
-      return result.ok ? result.file : null
+      if (!tab?.repo) return
+      const result = await window.tiro.readCode(tab.repo.path, path)
+      if (!result.ok) {
+        setOpenError(result.message)
+        return
+      }
+      setCodeView({ file: result.file, from, to, note })
     },
     [],
   )
@@ -863,6 +869,11 @@ export function App() {
               onExtract={() => void findConcepts(active.id)}
               onJump={jumpTo}
               onDeeper={(concept) => goDeeper(active.id, concept)}
+              onOpenCode={
+                active.repo
+                  ? (path, from, to) => void openCode(active.id, path, from, to)
+                  : undefined
+              }
               onSettings={() => setSettingsOpen(true)}
             />
           )}
@@ -873,6 +884,11 @@ export function App() {
               setupMessage={setupMessage}
               streaming={isStreaming(active)}
               repoName={active.repo?.name ?? null}
+              onOpenCode={
+                active.repo
+                  ? (path, from, to) => void openCode(active.id, path, from, to)
+                  : undefined
+              }
               onSend={(question) =>
                 askInChat(active.id, 'chat', question, active.pinned ?? undefined)
               }
@@ -896,7 +912,15 @@ export function App() {
                 patchTab(active.id, { repo: null, codeMatches: [], codeStatus: 'idle' })
               }
               onMatch={() => void matchCode(active.id)}
-              onRead={(path) => readCode(active.id, path)}
+              onExpand={(location) =>
+                openCode(
+                  active.id,
+                  location.path,
+                  location.startLine,
+                  location.endLine,
+                  location.reason,
+                )
+              }
               onSettings={() => setSettingsOpen(true)}
             />
           )}
@@ -936,6 +960,8 @@ export function App() {
           }}
         />
       )}
+
+      {codeView && <CodeModal view={codeView} onClose={() => setCodeView(null)} />}
 
       {settingsSheet}
     </div>

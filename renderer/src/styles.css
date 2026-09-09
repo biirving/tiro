@@ -1845,28 +1845,19 @@ body.is-resizing * {
   line-height: 1.55;
 }
 
-.code-snippet,
-.code-file {
+.code-snippet {
   margin: 0 0 8px;
-  max-height: 340px;
+  max-height: 260px;
   overflow: auto;
-  padding: 8px 0;
+  padding: 9px 11px;
   background: var(--ink);
   border: 1px solid var(--rule-soft);
   border-radius: 5px;
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
-}
-
-.code-snippet {
-  padding: 9px 11px;
   color: var(--text-2);
   white-space: pre;
-}
-
-.code-file {
-  max-height: 460px;
 }
 
 .code-line {
@@ -1896,14 +1887,82 @@ body.is-resizing * {
   color: var(--text-2);
 }
 
-.code-truncated {
-  margin: 8px 11px 2px;
-  font-size: 10.5px;
+.code-rerun {
+  padding: 14px 18px 40px;
+}
+
+/* A file read at full width, rather than through the panel's letterbox. */
+.code-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 94vw);
+  height: min(84vh, 900px);
+  background: var(--chrome-2);
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  box-shadow: 0 30px 70px -24px rgb(0 0 0 / 0.9);
+  overflow: hidden;
+}
+
+.code-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.code-modal-id {
+  min-width: 0;
+}
+
+.code-modal-path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--teal);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.code-modal-meta {
+  font-family: var(--mono);
+  font-size: 10px;
   color: var(--muted-dim);
 }
 
-.code-rerun {
-  padding: 14px 18px 40px;
+.code-modal-note {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 12px;
+}
+
+.code-modal-head .button-ghost,
+.code-modal-head .sheet-close {
+  flex: none;
+}
+
+.code-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 0 40px;
+  background: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.code-modal-body .code-ln {
+  width: 5ch;
 }
 
 /* ---------- prose (assistant answers) ---------- */
@@ -1971,6 +2030,25 @@ body.is-resizing * {
 }
 
 .page-ref:hover {
+  background: var(--teal-wash);
+  color: var(--teal-bright);
+}
+
+.code-ref {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--teal);
+  vertical-align: baseline;
+  transition: background 110ms, border-color 110ms;
+}
+
+.code-ref:hover {
+  border-color: var(--teal-line);
   background: var(--teal-wash);
   color: var(--teal-bright);
 }

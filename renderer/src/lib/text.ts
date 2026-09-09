@@ -67,10 +67,28 @@ export type Inline =
   | { kind: 'em'; text: string }
   | { kind: 'code'; text: string }
   | { kind: 'page'; label: string; page: number }
+  | { kind: 'code-ref'; label: string; path: string; from: number; to: number }
   | { kind: 'math'; tex: string; display: boolean }
 
 const PAGE_REF = /\[(?:pp?\.|pages?|p)\s*(\d+)(?:\s*[-–—]\s*(\d+))?\]/gi
 const MARKUP = /(\*\*[^*]+\*\*|(?<![*\w])\*[^*\n]+\*(?!\w)|`[^`]+`)/g
+
+/**
+ * A citation into the linked repository: `src/policy.py:120` or `src/policy.py:120-158`.
+ * Requires a directory separator or a line number, so prose like `e.g` and bare
+ * identifiers stay plain code.
+ */
+const CODE_REF = /^([A-Za-z0-9_@.\-]+(?:\/[A-Za-z0-9_@.\-]+)*\.[A-Za-z]{1,6})(?::(\d+)(?:[-–](\d+))?)?$/
+
+function asCodeRef(text: string): Inline | null {
+  const match = CODE_REF.exec(text.trim())
+  if (!match) return null
+  const [, path, start, end] = match
+  if (!path.includes('/') && start === undefined) return null
+  const from = start ? Number(start) : 1
+  const to = end ? Number(end) : from
+  return { kind: 'code-ref', label: text.trim(), path, from, to }
+}
 
 /**
  * LaTeX delimiters, longest first. The bare `$…$` form requires non-space just
@@ -115,7 +133,8 @@ export function parseInline(line: string): Inline[] {
       if (piece.startsWith('**') && piece.endsWith('**')) {
         out.push({ kind: 'strong', text: piece.slice(2, -2) })
       } else if (piece.startsWith('`') && piece.endsWith('`')) {
-        out.push({ kind: 'code', text: piece.slice(1, -1) })
+        const inner = piece.slice(1, -1)
+        out.push(asCodeRef(inner) ?? { kind: 'code', text: inner })
       } else if (piece.startsWith('*') && piece.endsWith('*') && piece.length > 2) {
         out.push({ kind: 'em', text: piece.slice(1, -1) })
       } else {

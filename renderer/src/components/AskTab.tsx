@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatTurn } from '@shared/types'
 import { truncate } from '@/lib/text'
-import { Prose } from './Prose'
+import { Prose, type CodeRefHandler } from './Prose'
 
 interface AskTabProps {
   chat: ChatTurn[]
   selection: { text: string; page: number } | null
   /** Set when a repository is linked, so the composer can say it is searchable. */
   repoName: string | null
+  onOpenCode?: CodeRefHandler
   setupMessage: string | null
   streaming: boolean
   onSend: (question: string) => void
@@ -63,6 +64,7 @@ export function AskTab({
   chat,
   selection,
   repoName,
+  onOpenCode,
   setupMessage,
   streaming,
   onSend,
@@ -190,7 +192,11 @@ export function AskTab({
                           ))}
                         </ul>
                       )}
-                      <Prose text={exchange.answer.content} onJump={onJump} />
+                      <Prose
+                        text={exchange.answer.content}
+                        onJump={onJump}
+                        onOpenCode={onOpenCode}
+                      />
                       {exchange.answer.streaming && !exchange.answer.content && (
                         <span className="thinking">Reading the document…</span>
                       )}

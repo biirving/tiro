@@ -103,10 +103,16 @@ reopen it — so the whole-document read is paid for once.
 
 ## Getting started
 
+Needs Node 22.12 or newer, and git. Nothing else — no Rust, no Docker, no
+system libraries to install first.
+
 ```bash
-npm install
-npm run dev
+git clone https://github.com/biirving/tiro.git && cd tiro && npm install && npm run dev
 ```
+
+That is the whole thing: `npm install` pulls Electron, and the first run
+regenerates the pdf.js assets automatically. To build installers instead of
+running from source, see [Building installers](#building-installers).
 
 Then open **Settings** (`⌘,` on macOS, `Ctrl+,` on Linux) and pick a model.
 

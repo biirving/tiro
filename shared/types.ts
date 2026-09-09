@@ -89,6 +89,42 @@ export interface Failure {
 
 export type Result<T> = ({ ok: true } & T) | Failure
 
+/** A place in the repository that implements a concept from the paper. */
+export interface CodeLocation {
+  /** Repo-relative, always. Absolute paths never cross to the renderer. */
+  path: string
+  /** 1-indexed, inclusive. */
+  startLine: number
+  endLine: number
+  /** The declaration this sits in, when the match is a symbol. */
+  symbol?: string
+  /** One sentence on why this is the code for the concept. */
+  reason: string
+  /** The lines themselves, so the list renders without another read. */
+  snippet: string
+}
+
+export interface ConceptCode {
+  conceptId: string
+  locations: CodeLocation[]
+}
+
+export interface RepoLink {
+  /** Absolute path on disk. Shown to the reader, never used for lookups. */
+  path: string
+  /** Basename, for the tab header. */
+  name: string
+  /** Source files the scan actually indexed. */
+  fileCount: number
+}
+
+export interface CodeFile {
+  path: string
+  content: string
+  lineCount: number
+  truncated: boolean
+}
+
 export type ProviderId = 'anthropic' | 'openai' | 'ollama'
 
 export interface ModelOption {
@@ -128,6 +164,14 @@ export interface TiroBridge {
   readPdf(path: string): Promise<OpenedPdf | null>
   registerDoc(payload: DocPayload): Promise<Result<Record<string, never>>>
   concepts(docId: string): Promise<Result<{ concepts: Concept[] }>>
+  pickRepo(): Promise<RepoLink | null>
+  linkRepo(path: string): Promise<Result<{ repo: RepoLink }>>
+  matchCode(
+    docId: string,
+    repoPath: string,
+    concepts: Concept[],
+  ): Promise<Result<{ matches: ConceptCode[] }>>
+  readCode(repoPath: string, filePath: string): Promise<Result<{ file: CodeFile }>>
   ask(streamId: string, request: AskRequest, onEvent: (event: AskEvent) => void): Promise<void>
   cancelAsk(streamId: string): void
   getProviderState(): Promise<ProviderState>

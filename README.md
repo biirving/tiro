@@ -2,7 +2,7 @@
 
 A PDF reader for macOS and Linux that keeps the whole document in context.
 
-Open a paper, read it, select anything and ask. Claude reads all of it once and
+Open a paper, read it, select anything and ask. The model reads all of it once and
 builds a concept map, so the term defined on page 4 is one click away when it
 reappears on page 40 — instead of a scroll back through the parts you skimmed.
 

@@ -1,18 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import type { Concept, ModelOption } from '@shared/types'
+import type { ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import {
-  CONCEPTS_TASK,
-  ConceptsSchema,
-  documentBlock,
-  GUIDE,
-  normalizeConcepts,
-  userTurn,
-} from './prompts'
-import { historyTurns, type AskArgs, type Provider } from './types'
+import { documentBlock, GUIDE, userTurn } from './prompts'
+import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromAnthropicUsage, reportUsage } from './usage'
 
 const BETAS = ['server-side-fallback-2026-07-01', 'extended-cache-ttl-2025-04-11'] as const
@@ -101,29 +94,27 @@ export const anthropicProvider: Provider = {
     emit({ type: 'done' })
   },
 
-  async extractConcepts(doc: StoredDoc, signal: AbortSignal): Promise<Concept[]> {
+  async structured<T>({ label, doc, user, schema, maxTokens, signal }: StructuredCall<T>): Promise<T> {
     const started = Date.now()
     const response = await client().beta.messages.parse(
       {
         model: model(),
-        max_tokens: 24000,
+        max_tokens: maxTokens,
         betas: [...BETAS],
         fallbacks: 'default',
         thinking: { type: 'adaptive' },
         // Same effort, thinking, betas, model, and system blocks as an answer,
-        // so both share one cache entry. Whether adding `format` here perturbs
-        // the prefix is not something the docs settle; the [cache] log says so
-        // either way, and this call runs once per document regardless.
-        output_config: { effort: DOC_EFFORT, format: zodOutputFormat(ConceptsSchema) },
+        // so every request about this document shares one cache entry.
+        output_config: { effort: DOC_EFFORT, format: zodOutputFormat(schema) },
         system: system(doc),
-        messages: [{ role: 'user', content: CONCEPTS_TASK }],
+        messages: [{ role: 'user', content: user }],
       },
       // A few hundred pages at high effort can run for minutes.
       { signal, timeout: 20 * 60 * 1000 },
     )
 
     reportUsage({
-      label: 'concepts',
+      label,
       provider: 'anthropic',
       model: model(),
       usage: fromAnthropicUsage(response.usage),
@@ -131,12 +122,11 @@ export const anthropicProvider: Provider = {
     })
 
     if (response.stop_reason === 'refusal') {
-      throw new Error('Claude declined to summarize this document.')
+      throw new Error('Claude declined to answer that.')
     }
     const parsed = response.parsed_output
-    if (!parsed) throw new Error('Claude returned concepts in an unreadable shape. Try again.')
-
-    return normalizeConcepts(parsed, doc.pages.length)
+    if (!parsed) throw new Error('Claude returned an unreadable shape. Try again.')
+    return parsed
   },
 
   async listModels(): Promise<ModelOption[]> {

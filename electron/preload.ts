@@ -43,6 +43,8 @@ const bridge: TiroBridge = {
     ipcRenderer.invoke('tiro:set-key', provider, key),
   clearApiKey: (provider: ProviderId) => ipcRenderer.invoke('tiro:clear-key', provider),
 
+  openExternal: (url: string) => ipcRenderer.send('tiro:open-external', url),
+
   onOpenFile: (handler) => {
     const listener = (_event: unknown, file: OpenedPdf) => handler(file)
     ipcRenderer.on('tiro:open-file', listener)

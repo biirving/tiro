@@ -21,6 +21,12 @@ happen to be looking.
 The document's own table of contents is on the left. Your highlights sit on the
 page in amber and as ticks in the thin ribbon between the page and the panel.
 
+**The paper's own citations work.** Click `(Alayrac et al., 2022)` and the
+bibliography entry comes to you in a small card — copyable, for pasting into a
+search — with a button to the reference page if you want it. Jumping to the back
+of a paper and finding your way home is the thing this avoids, so the entry
+travels rather than you. Links to the web open in your browser.
+
 **Read.** Continuous scroll, real text selection, the document's own table of
 contents in the left rail, `⌘F` search across every page at once with jump-to
 results. Drag the edge between the page and the panel to give either one more

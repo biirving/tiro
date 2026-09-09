@@ -188,6 +188,7 @@ export interface TiroBridge {
   listModels(provider: ProviderId): Promise<Result<{ models: ModelOption[] }>>
   setApiKey(provider: ProviderId, key: string): Promise<Result<Record<string, never>>>
   clearApiKey(provider: ProviderId): Promise<ProviderState>
+  openExternal(url: string): void
   onOpenFile(handler: (file: OpenedPdf) => void): () => void
   onMenu(handler: (action: MenuAction) => void): () => void
   platform: string

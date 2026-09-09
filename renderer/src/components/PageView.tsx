@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { Highlight } from '@shared/types'
-import { renderPage, type RenderedPage } from '@/lib/pdf'
+import { readPageLinks, renderPage, type PageLink, type RenderedPage } from '@/lib/pdf'
 
 interface PageViewProps {
   pdf: PDFDocumentProxy
@@ -13,6 +13,7 @@ interface PageViewProps {
   active: boolean
   highlights: Highlight[]
   flashId: string | null
+  onFollowLink: (link: PageLink, at: { x: number; y: number }) => void
 }
 
 function PageViewInner({
@@ -24,10 +25,12 @@ function PageViewInner({
   active,
   highlights,
   flashId,
+  onFollowLink,
 }: PageViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const textRef = useRef<HTMLDivElement | null>(null)
   const [painted, setPainted] = useState(false)
+  const [links, setLinks] = useState<PageLink[]>([])
 
   useEffect(() => {
     if (!active) return
@@ -52,6 +55,19 @@ function PageViewInner({
       setPainted(false)
     }
   }, [active, pdf, pageNumber, scale])
+
+  // A paper's own citations are link annotations; without this layer they are
+  // just blue text that does nothing.
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    void readPageLinks(pdf, pageNumber).then((found) => {
+      if (!cancelled) setLinks(found)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [active, pdf, pageNumber])
 
   const style = {
     width: `${width}px`,
@@ -83,6 +99,25 @@ function PageViewInner({
             )}
           </div>
           <div ref={textRef} className="textLayer" />
+          <div className="link-layer">
+            {links.map((link, i) => (
+              <button
+                key={i}
+                type="button"
+                className="page-link"
+                style={{
+                  left: `${link.rect.x * 100}%`,
+                  top: `${link.rect.y * 100}%`,
+                  width: `${link.rect.w * 100}%`,
+                  height: `${link.rect.h * 100}%`,
+                }}
+                title={link.url ?? 'Show this reference'}
+                onClick={(event) =>
+                  onFollowLink(link, { x: event.clientX, y: event.clientY })
+                }
+              />
+            ))}
+          </div>
           {!painted && <div className="page-loading" aria-hidden />}
         </>
       ) : (

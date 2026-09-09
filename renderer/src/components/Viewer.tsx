@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { Highlight } from '@shared/types'
+import type { PageLink } from '@/lib/pdf'
 import { pickSelection, type PickedSelection } from '@/lib/selection'
 import type { Layout } from '@/lib/layout'
 import { PageView } from './PageView'
@@ -31,6 +32,7 @@ interface ViewerProps {
   onPageChange: (page: number) => void
   onScroll: (metrics: { scrollTop: number; viewport: number }) => void
   onSelect: (picked: PickedSelection | null) => void
+  onFollowLink: (link: PageLink, at: { x: number; y: number }) => void
 }
 
 export function Viewer({
@@ -46,6 +48,7 @@ export function Viewer({
   onPageChange,
   onScroll,
   onSelect,
+  onFollowLink,
 }: ViewerProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const frame = useRef<number | null>(null)
@@ -168,6 +171,7 @@ export function Viewer({
                 active={pageNumber >= first && pageNumber <= last}
                 highlights={highlightsByPage.get(pageNumber) ?? []}
                 flashId={flashId}
+                onFollowLink={onFollowLink}
               />
             </div>
           )

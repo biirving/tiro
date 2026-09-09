@@ -10,7 +10,15 @@ import type {
 } from '@shared/types'
 import { runAsk, type RunningAsk } from './lib/ask'
 import { computeLayout, type PageSize } from './lib/layout'
-import { documentTitle, extractPageText, openDocument, pageSize, readOutline } from './lib/pdf'
+import {
+  documentTitle,
+  extractPageText,
+  openDocument,
+  pageSize,
+  readOutline,
+  referenceAt,
+  type PageLink,
+} from './lib/pdf'
 import { clearSelection, type PickedSelection } from './lib/selection'
 import {
   flushRecord,
@@ -28,6 +36,7 @@ import { applyPatch, isStreaming, neighbourOf, type DocTab, type TabPatch } from
 import { truncate, widenConceptPages } from './lib/text'
 import { AskTab } from './components/AskTab'
 import { CodeTab } from './components/CodeTab'
+import { CitationPopup, type Citation } from './components/CitationPopup'
 import { CodeModal, type CodeView } from './components/CodeModal'
 import { ConceptsTab, type DeeperState } from './components/ConceptsTab'
 import { FindBar } from './components/FindBar'
@@ -77,6 +86,8 @@ export function App() {
   const [selection, setSelection] = useState<PickedSelection | null>(null)
   /** A source file open above everything, where it can actually be read. */
   const [codeView, setCodeView] = useState<CodeView | null>(null)
+  /** A reference the reader clicked in the paper itself. */
+  const [citation, setCitation] = useState<Citation | null>(null)
 
   /** Read inside callbacks so they never close over a stale tab list. */
   const tabsRef = useRef<DocTab[]>([])
@@ -189,6 +200,26 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [flashId])
 
+  /**
+   * A citation in the paper. Internal ones bring the bibliography entry to the
+   * reader rather than throwing them to another page and back; external ones
+   * are for the browser.
+   */
+  const followLink = useCallback(
+    async (link: PageLink, at: { x: number; y: number }) => {
+      if (link.url) {
+        window.tiro.openExternal(link.url)
+        return
+      }
+      const target = link.internal
+      const tab = tabsRef.current.find((entry) => entry.id === activeId)
+      if (!target || !tab) return
+      const text = await referenceAt(tab.pdf, target.page, target.y)
+      setCitation({ text, page: target.page, anchor: at })
+    },
+    [activeId],
+  )
+
   const jumpTo = useCallback((target: number, within?: number, flash?: string) => {
     jumpSeq.current += 1
     setJump({ page: target, seq: jumpSeq.current, offset: within })
@@ -219,6 +250,7 @@ export function App() {
       setActiveId(id)
       setSelection(null)
       clearSelection()
+      setCitation(null)
       setFindOpen(false)
       setJump(null)
       const tab = tabsRef.current.find((entry) => entry.id === id)
@@ -831,6 +863,7 @@ export function App() {
             onPageChange={setPage}
             onScroll={setMetrics}
             onSelect={setSelection}
+            onFollowLink={(link, at) => void followLink(link, at)}
           />
         </div>
 
@@ -958,6 +991,17 @@ export function App() {
             setSelection(null)
             clearSelection()
           }}
+        />
+      )}
+
+      {citation && (
+        <CitationPopup
+          citation={citation}
+          onGoToPage={(page) => {
+            jumpTo(page)
+            setCitation(null)
+          }}
+          onClose={() => setCitation(null)}
         />
       )}
 

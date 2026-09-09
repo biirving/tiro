@@ -370,6 +370,11 @@ function registerIpc(): void {
 
   ipcMain.on('tiro:cancel-ask', (_event, streamId: string) => cancelAsk(streamId))
 
+  ipcMain.on('tiro:open-external', (_event, url: string) => {
+    // Only ever a link the PDF itself carries, and only over the web.
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  })
+
   ipcMain.handle('tiro:pick-repo', async () => {
     const result = await dialog.showOpenDialog({
       title: 'Choose the repository for this paper',

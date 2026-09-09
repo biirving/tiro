@@ -1,0 +1,48 @@
+{
+  "name": "tiro",
+  "productName": "Tiro",
+  "version": "0.1.0",
+  "description": "A PDF reader that keeps the whole document in context",
+  "author": "Ben Irving",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "assets": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "npm run assets",
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "tsc -b",
+    "prebuild": "npm run assets",
+    "build": "npm run typecheck && electron-vite build",
+    "dist:mac": "npm run build && electron-builder --mac --arm64 --x64",
+    "dist:mac:arm": "npm run build && electron-builder --mac --arm64",
+    "dist:dir": "npm run build && electron-builder --dir",
+    "dist:linux": "npm run build && electron-builder --linux --x64",
+    "dist:linux:arm": "npm run build && electron-builder --linux --arm64"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "openai": "^7.10.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/ibm-plex-serif": "^5.3.0",
+    "@types/katex": "^0.16.8",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "katex": "^0.18.7",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.14"
+  },
+  "desktopName": "tiro.desktop"
+}

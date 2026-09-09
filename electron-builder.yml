@@ -1,0 +1,53 @@
+appId: dev.tiro.reader
+productName: Tiro
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+mac:
+  category: public.app-category.productivity
+  # Arch comes from the CLI so dist:mac:arm can skip the Intel build.
+  target:
+    - dmg
+  darkModeSupport: true
+  # Unsigned by default: no Apple Developer account required to produce a .dmg.
+  # See README for turning on signing and notarization.
+  identity: null
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: PDF document
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        LSItemContentTypes: [com.adobe.pdf]
+linux:
+  category: Office
+  # Links running windows to the .desktop entry, so the taskbar shows our icon.
+  syncDesktopName: true
+  synopsis: A PDF reader that keeps the whole document in context
+  description: >
+    Open a paper, select anything and ask. Tiro reads the whole document once and
+    builds a concept map, so a term defined forty pages ago is one click away
+    instead of a scroll back.
+  maintainer: Ben Irving <biirving@ucsc.edu>
+  # Reuse the existing PDF mime type rather than registering a new one.
+  mimeTypes:
+    - application/pdf
+  desktop:
+    entry:
+      Keywords: pdf;reader;research;paper;annotate
+  target:
+    - AppImage
+    - deb
+
+dmg:
+  title: Tiro ${version}
+  contents:
+    - x: 140
+      y: 200
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications

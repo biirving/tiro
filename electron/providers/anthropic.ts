@@ -4,7 +4,8 @@ import type { ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import { documentBlock, GUIDE, userTurn } from './prompts'
+import { documentBlock, GUIDE, REPO_GUIDE, userTurn } from './prompts'
+import { CODE_TOOLS, describeToolCall, runCodeTool } from '../repo/tools'
 import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromAnthropicUsage, reportUsage } from './usage'
 
@@ -37,10 +38,26 @@ function model(): string {
   return id
 }
 
-/** Prefix shared by every request about one document. Stable to the byte. */
-function system(doc: StoredDoc): Anthropic.Beta.BetaTextBlockParam[] {
+/** Rounds of searching before we stop and answer with what we have. */
+const MAX_TOOL_ROUNDS = 6
+
+function repoTools(): Anthropic.Beta.BetaToolUnion[] {
+  return CODE_TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters as Anthropic.Beta.BetaTool['input_schema'],
+  }))
+}
+
+/**
+ * Prefix shared by every request about one document. Stable to the byte.
+ *
+ * The repository guidance is part of it, so a document with a repo linked keeps
+ * one cache entry across all its questions rather than alternating.
+ */
+function system(doc: StoredDoc, withRepo: boolean): Anthropic.Beta.BetaTextBlockParam[] {
   return [
-    { type: 'text', text: GUIDE },
+    { type: 'text', text: withRepo ? `${GUIDE}\n\n${REPO_GUIDE}` : GUIDE },
     {
       type: 'text',
       text: documentBlock(doc),
@@ -55,43 +72,86 @@ export const anthropicProvider: Provider = {
 
   async streamAnswer({ doc, request, emit, signal }: AskArgs) {
     const started = Date.now()
-    const stream = client().beta.messages.stream(
-      {
-        model: model(),
-        max_tokens: 32000,
-        betas: [...BETAS],
-        fallbacks: 'default',
-        thinking: { type: 'adaptive' },
-        output_config: { effort: DOC_EFFORT },
-        system: system(doc),
-        messages: [...historyTurns(request), { role: 'user', content: userTurn(request) }],
-      },
-      { signal },
-    )
+    const repoPath = request.repoPath
+    const tools = repoPath ? repoTools() : undefined
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        emit({ type: 'text', text: event.delta.text })
+    const messages: Anthropic.Beta.BetaMessageParam[] = [
+      ...historyTurns(request),
+      { role: 'user', content: userTurn(request) },
+    ]
+
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+      const stream = client().beta.messages.stream(
+        {
+          model: model(),
+          max_tokens: 32000,
+          betas: [...BETAS],
+          fallbacks: 'default',
+          thinking: { type: 'adaptive' },
+          output_config: { effort: DOC_EFFORT },
+          system: system(doc, Boolean(repoPath)),
+          ...(tools ? { tools } : {}),
+          messages,
+        },
+        { signal },
+      )
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          emit({ type: 'text', text: event.delta.text })
+        }
       }
-    }
 
-    const final = await stream.finalMessage()
-    reportUsage({
-      label: 'ask',
-      provider: 'anthropic',
-      model: model(),
-      usage: fromAnthropicUsage(final.usage),
-      elapsedMs: Date.now() - started,
-    })
-
-    if (final.stop_reason === 'refusal') {
-      emit({
-        type: 'error',
-        message: 'Claude declined to answer that one. Try asking a different way.',
+      const final = await stream.finalMessage()
+      reportUsage({
+        label: 'ask',
+        provider: 'anthropic',
+        model: model(),
+        usage: fromAnthropicUsage(final.usage),
+        elapsedMs: Date.now() - started,
       })
-      return
+
+      if (final.stop_reason === 'refusal') {
+        emit({
+          type: 'error',
+          message: 'Claude declined to answer that one. Try asking a different way.',
+        })
+        return
+      }
+
+      if (final.stop_reason !== 'tool_use' || !repoPath) {
+        emit({ type: 'done' })
+        return
+      }
+
+      if (round === MAX_TOOL_ROUNDS) {
+        emit({
+          type: 'error',
+          message: `Stopped after ${MAX_TOOL_ROUNDS} rounds of searching the repository.`,
+        })
+        return
+      }
+
+      // The whole content goes back, thinking blocks included — they are bound
+      // to this model and must be replayed unchanged.
+      messages.push({ role: 'assistant', content: final.content })
+
+      const results: Anthropic.Beta.BetaToolResultBlockParam[] = []
+      for (const block of final.content) {
+        if (block.type !== 'tool_use') continue
+        emit({ type: 'tool', text: describeToolCall(block.name, block.input) })
+        let output: string
+        try {
+          output = await runCodeTool(repoPath, block.name, block.input)
+        } catch (error) {
+          output = `That lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`
+        }
+        results.push({ type: 'tool_result', tool_use_id: block.id, content: output })
+      }
+      // All results in one user message; splitting them teaches the model to
+      // stop calling tools in parallel.
+      messages.push({ role: 'user', content: results })
     }
-    emit({ type: 'done' })
   },
 
   async structured<T>({ label, doc, user, schema, maxTokens, signal }: StructuredCall<T>): Promise<T> {
@@ -106,7 +166,7 @@ export const anthropicProvider: Provider = {
         // Same effort, thinking, betas, model, and system blocks as an answer,
         // so every request about this document shares one cache entry.
         output_config: { effort: DOC_EFFORT, format: zodOutputFormat(schema) },
-        system: system(doc),
+        system: system(doc, false),
         messages: [{ role: 'user', content: user }],
       },
       // A few hundred pages at high effort can run for minutes.

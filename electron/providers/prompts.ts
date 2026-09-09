@@ -24,6 +24,13 @@ Ground every answer in this document.
 - If the answer is not in the document, say that in one sentence and stop. Do not fill the gap with plausible detail.
 - Refer to it as the paper, the document, or by its title — never "the provided text" or "the context".`
 
+/** Appended only when a repository is linked and the tools are available. */
+export const REPO_GUIDE = `A repository is linked to this paper and you can search and read it.
+
+- Reach for it when the question is about what the code does, where something is implemented, or whether the code matches what the paper claims. Do not go looking for questions the paper answers on its own.
+- Search first, then read a range around what you find. Cite code as \`path:line\`, which the reader can open.
+- The repository may not implement everything the paper describes, and may have moved on since. Say so when the two disagree, rather than reconciling them.`
+
 export function documentBlock(doc: StoredDoc): string {
   return `<document title="${doc.title}" pages="${doc.pages.length}">\n${doc.text}\n</document>`
 }

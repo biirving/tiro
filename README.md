@@ -39,6 +39,11 @@ sentence, and clicking one jumps there.
 - **Explain** — the passage in plain language, naming what it depends on earlier
 - **Ask…** — carries the selection into the Ask tab as context
 
+The conversation is grouped into exchanges — your question with the answer to
+it, separated by a rule and marked in amber, so you can find what you asked
+rather than reading a wall of prose. A Define or Explain turn reads as the
+action it was. Past a couple of exchanges a search box appears and filters them.
+
 Every page citation in an answer (`[p. 12]`) is a button that jumps there, and
 answers render LaTeX — `$\pi_\theta$` inline, `$$…$$` as a display equation —
 so notation reads the way the paper writes it. Concept definitions render it too,
@@ -67,6 +72,18 @@ are matched against identifiers and comments locally — `action chunk` finds
 snippets goes to the model, which answers with candidate *ids* rather than paths,
 so a hallucinated file is not merely unlikely but unrepresentable. Opening a full
 file costs nothing at all.
+
+**Ask about the code too.** Once a repository is linked, the Ask tab can search
+and read it while answering — "is the chunk size in the paper the default here?",
+"where does this loss actually get computed?". The answer shows what it looked
+up before replying.
+
+This is not filesystem access. The model gets three read-only tools —
+`search_code`, `read_file`, `list_files` — answered entirely from the in-memory
+index of that one repository. Nothing outside it is reachable, nothing can be
+written, and a path that is not an indexed source file is refused. Available on
+Anthropic and OpenAI; local models do not get the tools, since support varies
+too much by model to rely on.
 
 That keeps a pass at roughly the cost of the concept extraction you already ran —
 the paper is read from the same cache, so only the candidate code is new. It runs
@@ -191,6 +208,11 @@ about a file reuses that prefix byte for byte. The first question pays for the
 document; the rest should be much cheaper. Each backend needs something
 different to make that actually happen:
 
+One caveat worth knowing: tool definitions sit at the very front of the prompt,
+so linking a repository gives the Ask tab its own cache entry, separate from the
+one the concept and code passes share. It costs one extra write of the document
+per session. The `[tiro]` log shows it.
+
 **Anthropic** — an explicit `cache_control` breakpoint on the document block,
 1-hour TTL. Every request about a document also pins the same `model`,
 `thinking`, `betas`, and `effort`, because an `effort` change invalidates the
@@ -291,6 +313,7 @@ electron/          main process — window, menu, IPC
     candidates.ts  concept terms to candidate code, locally and for free
     match.ts       shortlist to the model; ids back, never paths
     read.ts        one file out of a linked repo, refusing anything outside it
+    tools.ts       the read-only tools the Ask tab gets over a linked repo
   docs.ts          document text, keyed by file path
   settings.ts      provider choice, model choice, encrypted keys
   preload.ts       the window's only bridge to the main process

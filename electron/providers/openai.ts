@@ -4,7 +4,8 @@ import type { ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import { documentBlock, GUIDE, userTurn } from './prompts'
+import { documentBlock, GUIDE, REPO_GUIDE, userTurn } from './prompts'
+import { CODE_TOOLS, describeToolCall, runCodeTool } from '../repo/tools'
 import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromOpenAIUsage, reportUsage } from './usage'
 
@@ -26,11 +27,23 @@ function model(): string {
  * model families disagree about `max_tokens` vs `max_completion_tokens`, and the
  * default is the model's own maximum either way.
  */
-function messages(doc: StoredDoc, tail: { role: 'user' | 'assistant'; content: string }[]) {
-  return [
-    { role: 'system' as const, content: `${GUIDE}\n\n${documentBlock(doc)}` },
-    ...tail,
-  ]
+function messages(
+  doc: StoredDoc,
+  tail: OpenAI.Chat.ChatCompletionMessageParam[],
+  withRepo = false,
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  const guide = withRepo ? `${GUIDE}\n\n${REPO_GUIDE}` : GUIDE
+  return [{ role: 'system', content: `${guide}\n\n${documentBlock(doc)}` }, ...tail]
+}
+
+/** Rounds of searching before we stop and answer with what we have. */
+const MAX_TOOL_ROUNDS = 6
+
+function repoTools(): OpenAI.Chat.ChatCompletionTool[] {
+  return CODE_TOOLS.map((tool) => ({
+    type: 'function',
+    function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+  }))
 }
 
 export const openaiProvider: Provider = {
@@ -38,42 +51,100 @@ export const openaiProvider: Provider = {
 
   async streamAnswer({ doc, request, emit, signal }: AskArgs) {
     const started = Date.now()
-    const stream = await client().chat.completions.create(
-      {
-        model: model(),
-        stream: true,
-        // Routes every request about this document to the same cache, which is
-        // what lifts OpenAI's automatic prefix caching from luck to reliable.
-        prompt_cache_key: doc.cacheKey,
-        // Without this the final chunk carries no usage, and cache hits are
-        // unobservable.
-        stream_options: { include_usage: true },
-        messages: messages(doc, [
-          ...historyTurns(request),
-          { role: 'user', content: userTurn(request) },
-        ]),
-      },
-      { signal },
-    )
+    const repoPath = request.repoPath
+    const tools = repoPath ? repoTools() : undefined
 
-    let usage: OpenAI.CompletionUsage | undefined
-    for await (const chunk of stream) {
-      if (chunk.usage) usage = chunk.usage
-      const text = chunk.choices[0]?.delta?.content
-      if (text) emit({ type: 'text', text })
-    }
+    const tail: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      ...historyTurns(request),
+      { role: 'user', content: userTurn(request) },
+    ]
 
-    if (usage) {
-      reportUsage({
-        label: 'ask',
-        provider: 'openai',
-        model: model(),
-        usage: fromOpenAIUsage(usage),
-        elapsedMs: Date.now() - started,
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+      const stream = await client().chat.completions.create(
+        {
+          model: model(),
+          stream: true,
+          prompt_cache_key: doc.cacheKey,
+          stream_options: { include_usage: true },
+          ...(tools ? { tools } : {}),
+          messages: messages(doc, tail, Boolean(repoPath)),
+        },
+        { signal },
+      )
+
+      let usage: OpenAI.CompletionUsage | undefined
+      let text = ''
+      // Tool calls arrive split across chunks and keyed by index, not id.
+      const calls = new Map<number, { id: string; name: string; args: string }>()
+
+      for await (const chunk of stream) {
+        if (chunk.usage) usage = chunk.usage
+        const delta = chunk.choices[0]?.delta
+        if (delta?.content) {
+          text += delta.content
+          emit({ type: 'text', text: delta.content })
+        }
+        for (const call of delta?.tool_calls ?? []) {
+          const existing = calls.get(call.index) ?? { id: '', name: '', args: '' }
+          calls.set(call.index, {
+            id: call.id ?? existing.id,
+            name: call.function?.name ?? existing.name,
+            args: existing.args + (call.function?.arguments ?? ''),
+          })
+        }
+      }
+
+      if (usage) {
+        reportUsage({
+          label: 'ask',
+          provider: 'openai',
+          model: model(),
+          usage: fromOpenAIUsage(usage),
+          elapsedMs: Date.now() - started,
+        })
+      }
+
+      if (calls.size === 0 || !repoPath) {
+        emit({ type: 'done' })
+        return
+      }
+
+      if (round === MAX_TOOL_ROUNDS) {
+        emit({
+          type: 'error',
+          message: `Stopped after ${MAX_TOOL_ROUNDS} rounds of searching the repository.`,
+        })
+        return
+      }
+
+      const ordered = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call)
+      tail.push({
+        role: 'assistant',
+        content: text || null,
+        tool_calls: ordered.map((call) => ({
+          id: call.id,
+          type: 'function',
+          function: { name: call.name, arguments: call.args || '{}' },
+        })),
       })
-    }
 
-    emit({ type: 'done' })
+      for (const call of ordered) {
+        let input: unknown = {}
+        try {
+          input = JSON.parse(call.args || '{}')
+        } catch {
+          // Malformed arguments are handled by the tool itself.
+        }
+        emit({ type: 'tool', text: describeToolCall(call.name, input) })
+        let output: string
+        try {
+          output = await runCodeTool(repoPath, call.name, input)
+        } catch (error) {
+          output = `That lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`
+        }
+        tail.push({ role: 'tool', tool_call_id: call.id, content: output })
+      }
+    }
   },
 
   async structured<T>({ label, doc, user, schema, signal }: StructuredCall<T>): Promise<T> {

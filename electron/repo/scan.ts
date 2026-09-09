@@ -89,16 +89,21 @@ function symbolsIn(path: string, lines: string[]): RepoSymbol[] {
 /**
  * The file list.
  *
- * `git ls-files` is exact and free: it already honours .gitignore, skips
- * submodule contents, and never walks into node_modules or a virtualenv.
- * Falling back to a manual walk would mean reimplementing gitignore badly, so
- * a non-git directory is reported as such instead.
+ * `git ls-files` is exact and free: it honours .gitignore, skips submodule
+ * contents, and never walks into node_modules or a virtualenv. Reimplementing
+ * gitignore would be worse, so a non-git directory is reported as such instead.
+ *
+ * `--others --exclude-standard` adds files that are new and not yet committed.
+ * Without them, work in progress — often exactly what you are reading a paper
+ * to write — would be invisible to the search.
  */
 async function listFiles(root: string): Promise<string[]> {
-  const { stdout } = await run('git', ['-C', root, 'ls-files', '-z'], {
-    maxBuffer: 32 * 1024 * 1024,
-  })
-  return stdout.split('\0').filter(Boolean)
+  const { stdout } = await run(
+    'git',
+    ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    { maxBuffer: 32 * 1024 * 1024 },
+  )
+  return [...new Set(stdout.split('\0').filter(Boolean))]
 }
 
 export class NotARepoError extends Error {

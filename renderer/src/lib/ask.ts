@@ -7,6 +7,8 @@ import { newId } from './store'
 
 export interface AskHandlers {
   onText: (chunk: string) => void
+  /** The model looked something up in the linked repository. */
+  onTool: (note: string) => void
   onDone: () => void
   onError: (message: string, flags: { needsKey?: boolean }) => void
 }
@@ -33,6 +35,7 @@ export function runAsk(
     await window.tiro.ask(streamId, request, (event) => {
       if (cancelled) return
       if (event.type === 'text') handlers.onText(event.text)
+      else if (event.type === 'tool') handlers.onTool(event.text)
       else if (event.type === 'error') failed = event
     })
 

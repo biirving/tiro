@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatTurn } from '@shared/types'
 import { truncate } from '@/lib/text'
 import { Prose } from './Prose'
@@ -6,6 +6,8 @@ import { Prose } from './Prose'
 interface AskTabProps {
   chat: ChatTurn[]
   selection: { text: string; page: number } | null
+  /** Set when a repository is linked, so the composer can say it is searchable. */
+  repoName: string | null
   setupMessage: string | null
   streaming: boolean
   onSend: (question: string) => void
@@ -14,6 +16,41 @@ interface AskTabProps {
   onJump: (page: number) => void
   onSettings: () => void
   onClear: () => void
+}
+
+/** A question and the answer to it, kept together so neither reads alone. */
+interface Exchange {
+  key: string
+  question?: ChatTurn
+  answer?: ChatTurn
+}
+
+function toExchanges(chat: ChatTurn[]): Exchange[] {
+  const out: Exchange[] = []
+  for (const turn of chat) {
+    const last = out[out.length - 1]
+    if (turn.role === 'user') out.push({ key: turn.id, question: turn })
+    else if (last && !last.answer) last.answer = turn
+    else out.push({ key: turn.id, answer: turn })
+  }
+  return out
+}
+
+/** What a turn says it asked for, when it asked for something specific. */
+const ACTION_LABEL: Record<string, string> = {
+  define: 'Define',
+  explain: 'Explain',
+}
+
+function searchText(exchange: Exchange): string {
+  return [
+    exchange.question?.content,
+    exchange.question?.quote?.text,
+    exchange.answer?.content,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
 }
 
 const OPENERS = [
@@ -25,6 +62,7 @@ const OPENERS = [
 export function AskTab({
   chat,
   selection,
+  repoName,
   setupMessage,
   streaming,
   onSend,
@@ -35,14 +73,25 @@ export function AskTab({
   onClear,
 }: AskTabProps) {
   const [draft, setDraft] = useState('')
+  const [query, setQuery] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // Follow the answer as it streams, and after each new turn.
+  const exchanges = useMemo(() => toExchanges(chat), [chat])
+
+  const needle = query.trim().toLowerCase()
+  const shown = useMemo(
+    () => (needle ? exchanges.filter((entry) => searchText(entry).includes(needle)) : exchanges),
+    [exchanges, needle],
+  )
+
+  // Follow the answer as it streams — but not while searching, or the list
+  // would yank away from whatever was just found.
   useEffect(() => {
+    if (needle) return
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [chat])
+  }, [chat, needle])
 
   useEffect(() => {
     if (selection) inputRef.current?.focus()
@@ -85,35 +134,81 @@ export function AskTab({
             ))}
           </div>
         ) : (
-          <ul className="turns">
-            {chat.map((turn) => (
-              <li key={turn.id} className={`turn turn-${turn.role}`}>
-                {turn.quote && (
-                  <button
-                    type="button"
-                    className="turn-quote"
-                    onClick={() => onJump(turn.quote!.page)}
-                    title={`Go to p. ${turn.quote.page}`}
-                  >
-                    <span className="turn-quote-page">p. {turn.quote.page}</span>
-                    {truncate(turn.quote.text, 180)}
-                  </button>
+          <>
+            {exchanges.length > 1 && (
+              <div className="ask-search">
+                <input
+                  className="search"
+                  value={query}
+                  placeholder={`Search ${exchanges.length} exchanges`}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+                {needle && (
+                  <span className="ask-search-count">
+                    {shown.length} of {exchanges.length}
+                  </span>
                 )}
-                {turn.role === 'user' ? (
-                  turn.content && <p className="turn-question">{turn.content}</p>
-                ) : (
-                  <>
-                    <Prose text={turn.content} onJump={onJump} />
-                    {turn.streaming && !turn.content && (
-                      <span className="thinking">Reading the document…</span>
-                    )}
-                    {turn.streaming && turn.content && <span className="caret" aria-hidden />}
-                    {turn.error && <p className="panel-error">{turn.error}</p>}
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+
+            <ul className="turns">
+              {shown.map((exchange) => (
+                <li key={exchange.key} className="exchange">
+                  {exchange.question && (
+                    <div className="asked">
+                      {exchange.question.mode && ACTION_LABEL[exchange.question.mode] ? (
+                        <span className="asked-action">
+                          {ACTION_LABEL[exchange.question.mode]}
+                        </span>
+                      ) : (
+                        exchange.question.content && (
+                          <p className="asked-question">{exchange.question.content}</p>
+                        )
+                      )}
+                      {exchange.question.quote && (
+                        <button
+                          type="button"
+                          className="turn-quote"
+                          onClick={() => onJump(exchange.question!.quote!.page)}
+                          title={`Go to p. ${exchange.question.quote.page}`}
+                        >
+                          <span className="turn-quote-page">
+                            p. {exchange.question.quote.page}
+                          </span>
+                          {truncate(exchange.question.quote.text, 180)}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {exchange.answer && (
+                    <div className="answered">
+                      {exchange.answer.tools && exchange.answer.tools.length > 0 && (
+                        <ul className="looked-up">
+                          {exchange.answer.tools.map((note, i) => (
+                            <li key={i}>{note}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <Prose text={exchange.answer.content} onJump={onJump} />
+                      {exchange.answer.streaming && !exchange.answer.content && (
+                        <span className="thinking">Reading the document…</span>
+                      )}
+                      {exchange.answer.streaming && exchange.answer.content && (
+                        <span className="caret" aria-hidden />
+                      )}
+                      {exchange.answer.error && (
+                        <p className="panel-error">{exchange.answer.error}</p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+              {shown.length === 0 && (
+                <li className="ask-nomatch">Nothing in this conversation matches that.</li>
+              )}
+            </ul>
+          </>
         )}
       </div>
 
@@ -152,7 +247,9 @@ export function AskTab({
                 ? 'Pick a model to ask something new'
                 : selection
                   ? 'Ask about the selection…'
-                  : 'Ask about this document…'
+                  : repoName
+                    ? `Ask about this document, or ${repoName}…`
+                    : 'Ask about this document…'
             }
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {

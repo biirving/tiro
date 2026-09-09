@@ -34,18 +34,22 @@ export interface Highlight {
 
 export type Role = 'user' | 'assistant'
 
+/** What the assistant is being asked to do. Shapes the user turn, not the cached prefix. */
+export type AskMode = 'chat' | 'define' | 'explain' | 'deeper'
+
 export interface ChatTurn {
   id: string
   role: Role
   content: string
   /** Set on user turns that carried a passage from the page. */
   quote?: { text: string; page: number }
+  /** What was asked for. Lets a Define turn read as an action, not a sentence. */
+  mode?: AskMode
   streaming?: boolean
   error?: string
+  /** What the model did in the repository before answering, in order. */
+  tools?: string[]
 }
-
-/** What the assistant is being asked to do. Shapes the user turn, not the cached prefix. */
-export type AskMode = 'chat' | 'define' | 'explain' | 'deeper'
 
 export interface AskRequest {
   docId: string
@@ -55,10 +59,14 @@ export interface AskRequest {
   selection?: { text: string; page: number }
   /** Prior turns, oldest first. */
   history: { role: Role; content: string }[]
+  /** When set, the answer may search and read this repository. */
+  repoPath?: string
 }
 
 export type AskEvent =
   | { type: 'text'; text: string }
+  /** The model looked something up in the linked repository. */
+  | { type: 'tool'; text: string }
   | { type: 'done' }
   | { type: 'error'; message: string; needsKey?: boolean; needsDoc?: boolean }
 

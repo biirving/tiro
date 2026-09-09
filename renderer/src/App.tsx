@@ -421,7 +421,7 @@ export function App() {
         pinned: null,
         chat: [
           ...current.chat,
-          { id: newId(), role: 'user', content: question, quote },
+          { id: newId(), role: 'user', content: question, quote, mode },
           { id: answerId, role: 'assistant', content: '', streaming: true },
         ],
       }))
@@ -442,12 +442,20 @@ export function App() {
             question,
             selection: quote,
             history: historyFor(tab),
+            // Only when linked; without it the model has no repository tools.
+            repoPath: tab.repo?.path,
           },
           {
             onText: (chunk) =>
               patchTab(tabId, (current) => ({
                 chat: current.chat.map((turn) =>
                   turn.id === answerId ? { ...turn, content: turn.content + chunk } : turn,
+                ),
+              })),
+            onTool: (note) =>
+              patchTab(tabId, (current) => ({
+                chat: current.chat.map((turn) =>
+                  turn.id === answerId ? { ...turn, tools: [...(turn.tools ?? []), note] } : turn,
                 ),
               })),
             onDone: () => {
@@ -496,6 +504,7 @@ export function App() {
         runAsk(
           { docId: tabId, mode: 'deeper', question: concept.term, history: [] },
           {
+            onTool: () => {},
             onText: (chunk) =>
               patchTab(tabId, (current) => ({
                 deeper: {
@@ -863,6 +872,7 @@ export function App() {
               selection={active.pinned}
               setupMessage={setupMessage}
               streaming={isStreaming(active)}
+              repoName={active.repo?.name ?? null}
               onSend={(question) =>
                 askInChat(active.id, 'chat', question, active.pinned ?? undefined)
               }

@@ -25,6 +25,8 @@ export function clampPanelWidth(
 interface PanelResizerProps {
   width: number
   onResize: (width: number) => void
+  /** A step, so held or repeated arrow presses accumulate. */
+  onNudge: (delta: number) => void
   onReset: () => void
 }
 
@@ -34,7 +36,7 @@ interface PanelResizerProps {
  * Pointer capture keeps the drag alive when the cursor outruns the handle, and
  * the body-level class stops the drag from selecting text in the page behind it.
  */
-export function PanelResizer({ width, onResize, onReset }: PanelResizerProps) {
+export function PanelResizer({ width, onResize, onNudge, onReset }: PanelResizerProps) {
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const begin = (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -77,10 +79,10 @@ export function PanelResizer({ width, onResize, onReset }: PanelResizerProps) {
       onKeyDown={(event) => {
         if (event.key === 'ArrowLeft') {
           event.preventDefault()
-          onResize(clampPanelWidth(width + 24))
+          onNudge(24)
         } else if (event.key === 'ArrowRight') {
           event.preventDefault()
-          onResize(clampPanelWidth(width - 24))
+          onNudge(-24)
         }
       }}
     />

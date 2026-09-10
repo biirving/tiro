@@ -154,6 +154,26 @@ export function writePanelWidth(width: number): void {
   }
 }
 
+const PANEL_SCALE_KEY = 'tiro:panel-scale'
+
+export function readPanelScale(): number | null {
+  try {
+    const raw = localStorage.getItem(PANEL_SCALE_KEY)
+    const value = raw === null ? NaN : Number(raw)
+    return Number.isFinite(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function writePanelScale(scale: number): void {
+  try {
+    localStorage.setItem(PANEL_SCALE_KEY, scale.toFixed(2))
+  } catch {
+    // A lost preference is not worth interrupting a reading session over.
+  }
+}
+
 export function newId(): string {
   return crypto.randomUUID()
 }

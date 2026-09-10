@@ -25,10 +25,12 @@ import {
   forgetRecent,
   loadRecord,
   newId,
+  readPanelScale,
   readPanelWidth,
   recents,
   rememberRecent,
   saveRecordSoon,
+  writePanelScale,
   writePanelWidth,
   type RecentDoc,
 } from './lib/store'
@@ -43,7 +45,12 @@ import { FindBar } from './components/FindBar'
 import { MarginRibbon, type RibbonTick } from './components/MarginRibbon'
 import { MarksTab } from './components/MarksTab'
 import { OutlineRail } from './components/OutlineRail'
-import { Panel, type PanelTab } from './components/Panel'
+import {
+  clampPanelScale,
+  DEFAULT_PANEL_SCALE,
+  Panel,
+  type PanelTab,
+} from './components/Panel'
 import {
   clampPanelWidth,
   DEFAULT_PANEL_WIDTH,
@@ -76,6 +83,9 @@ export function App() {
     () => readPanelWidth() ?? DEFAULT_PANEL_WIDTH,
   )
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  const [panelScale, setPanelScale] = useState(() =>
+    clampPanelScale(readPanelScale() ?? DEFAULT_PANEL_SCALE),
+  )
 
   // Live state for whichever document is on screen. Updated every scroll frame,
   // so it is deliberately kept out of the tab objects.
@@ -180,6 +190,15 @@ export function App() {
   }, [tabs])
 
   const panelWidth = clampPanelWidth(preferredPanelWidth, viewportWidth)
+
+  const scalePanelBy = useCallback((delta: number) => {
+    setPanelScale((current) => clampPanelScale(current + delta))
+  }, [])
+
+  // Persisted from an effect so the updater above stays free of side effects.
+  useEffect(() => {
+    writePanelScale(panelScale)
+  }, [panelScale])
 
   const resizePanel = useCallback((width: number) => {
     setPreferredPanelWidth(width)
@@ -879,6 +898,7 @@ export function App() {
         <PanelResizer
           width={panelWidth}
           onResize={resizePanel}
+          onNudge={(delta) => setPreferredPanelWidth((current) => current + delta)}
           onReset={() => resizePanel(DEFAULT_PANEL_WIDTH)}
         />
 
@@ -889,6 +909,9 @@ export function App() {
           conceptCount={active.concepts.length}
           markCount={active.marks.length}
           codeCount={active.codeMatches.length}
+          scale={panelScale}
+          onScaleBy={scalePanelBy}
+          onScaleReset={() => setPanelScale(DEFAULT_PANEL_SCALE)}
         >
           {active.panelTab === 'concepts' && (
             <ConceptsTab

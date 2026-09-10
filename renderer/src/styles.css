@@ -963,8 +963,9 @@ body.is-resizing * {
 
 .tabs {
   display: flex;
+  align-items: flex-end;
   gap: 2px;
-  padding: 8px 10px 0;
+  padding: 8px 8px 0 10px;
   border-bottom: 1px solid var(--rule-soft);
 }
 
@@ -1000,6 +1001,40 @@ body.is-resizing * {
 
 .tab.is-active .tab-count {
   color: var(--text-2);
+}
+
+/* Sits at the end of the tab row, out of the way until wanted. */
+.text-size {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  align-self: center;
+  padding-bottom: 6px;
+}
+
+.text-size button {
+  min-width: 19px;
+  height: 19px;
+  border-radius: 4px;
+  color: var(--muted-dim);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.text-size button:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.text-size button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.text-size-reset {
+  font-family: var(--mono);
+  font-size: 10.5px !important;
 }
 
 .panel-body {

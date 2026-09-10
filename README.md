@@ -30,7 +30,10 @@ travels rather than you. Links to the web open in your browser.
 **Read.** Continuous scroll, real text selection, the document's own table of
 contents in the left rail, `⌘F` search across every page at once with jump-to
 results. Drag the edge between the page and the panel to give either one more
-room; double-click that edge to reset it. The width is remembered.
+room; double-click that edge to reset it. The `− A +` control at the end of the
+tab row scales the panel's text, up to double, for anyone reading on a large
+display — the panel keeps the width you dragged it to and only the contents
+grow. Both are remembered.
 
 ![Find in document, showing every match across the paper with page numbers](docs/find.png)
 

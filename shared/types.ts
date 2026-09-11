@@ -133,6 +133,27 @@ export interface CodeFile {
   truncated: boolean
 }
 
+/** A tool an MCP server advertises, as Tiro forwards it to a model. */
+export interface McpToolSpec {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+/**
+ * Whether the optional ferry document index is present. Absence is normal:
+ * every Tiro feature that does not concern the index behaves the same either
+ * way, and nothing surfaces an error for it.
+ */
+export interface FerryStatus {
+  available: boolean
+  source: 'environment' | 'setting' | 'path' | 'none'
+  command: string | null
+  /** Why it is unavailable, phrased for a reader rather than a log. */
+  reason: string | null
+  tools: { name: string; description: string }[]
+}
+
 export type ProviderId = 'anthropic' | 'openai' | 'ollama'
 
 export interface ModelOption {
@@ -182,6 +203,8 @@ export interface TiroBridge {
   readCode(repoPath: string, filePath: string): Promise<Result<{ file: CodeFile }>>
   ask(streamId: string, request: AskRequest, onEvent: (event: AskEvent) => void): Promise<void>
   cancelAsk(streamId: string): void
+  getFerryStatus(refresh?: boolean): Promise<FerryStatus>
+  setFerryCommand(command: string): Promise<FerryStatus>
   getProviderState(): Promise<ProviderState>
   setProvider(provider: ProviderId, model: string): Promise<ProviderState>
   setOllamaHost(host: string): Promise<ProviderState>

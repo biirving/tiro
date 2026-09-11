@@ -1,11 +1,10 @@
 import OpenAI from 'openai'
 import { zodResponseFormat } from 'openai/helpers/zod'
-import type { ModelOption } from '@shared/types'
+import type { McpToolSpec, ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import { documentBlock, GUIDE, REPO_GUIDE, userTurn } from './prompts'
-import { CODE_TOOLS, describeToolCall, runCodeTool } from '../repo/tools'
+import { documentBlock, GUIDE, userTurn } from './prompts'
 import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromOpenAIUsage, reportUsage } from './usage'
 
@@ -30,9 +29,9 @@ function model(): string {
 function messages(
   doc: StoredDoc,
   tail: OpenAI.Chat.ChatCompletionMessageParam[],
-  withRepo = false,
+  extraGuide = '',
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
-  const guide = withRepo ? `${GUIDE}\n\n${REPO_GUIDE}` : GUIDE
+  const guide = extraGuide ? `${GUIDE}\n\n${extraGuide}` : GUIDE
   return [{ role: 'system', content: `${guide}\n\n${documentBlock(doc)}` }, ...tail]
 }
 
@@ -47,8 +46,8 @@ const WRAP_UP =
   'You have used the search budget for this question. Do not look anything else up. ' +
   'Answer now with what you have found, and say plainly what you were unable to determine.'
 
-function repoTools(): OpenAI.Chat.ChatCompletionTool[] {
-  return CODE_TOOLS.map((tool) => ({
+function asOpenAITools(specs: McpToolSpec[]): OpenAI.Chat.ChatCompletionTool[] {
+  return specs.map((tool) => ({
     type: 'function',
     function: { name: tool.name, description: tool.description, parameters: tool.parameters },
   }))
@@ -57,10 +56,10 @@ function repoTools(): OpenAI.Chat.ChatCompletionTool[] {
 export const openaiProvider: Provider = {
   id: 'openai',
 
-  async streamAnswer({ doc, request, emit, signal }: AskArgs) {
+  async streamAnswer({ doc, request, tools: bundle, emit, signal }: AskArgs) {
     const started = Date.now()
-    const repoPath = request.repoPath
-    const tools = repoPath ? repoTools() : undefined
+    const hasTools = bundle.specs.length > 0
+    const tools = hasTools ? asOpenAITools(bundle.specs) : undefined
 
     const tail: OpenAI.Chat.ChatCompletionMessageParam[] = [
       ...historyTurns(request),
@@ -81,7 +80,7 @@ export const openaiProvider: Provider = {
           stream_options: { include_usage: true },
           ...(tools ? { tools } : {}),
           ...(wrapUp ? { tool_choice: 'none' as const } : {}),
-          messages: messages(doc, tail, Boolean(repoPath)),
+          messages: messages(doc, tail, bundle.guide),
         },
         { signal },
       )
@@ -118,7 +117,7 @@ export const openaiProvider: Provider = {
         })
       }
 
-      if (calls.size === 0 || !repoPath || wrapUp) {
+      if (calls.size === 0 || !hasTools || wrapUp) {
         emit({ type: 'done' })
         return
       }
@@ -141,10 +140,10 @@ export const openaiProvider: Provider = {
         } catch {
           // Malformed arguments are handled by the tool itself.
         }
-        emit({ type: 'tool', text: describeToolCall(call.name, input) })
+        emit({ type: 'tool', text: bundle.describe(call.name, input) })
         let output: string
         try {
-          output = await runCodeTool(repoPath, call.name, input)
+          output = await bundle.run(call.name, input)
         } catch (error) {
           output = `That lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`
         }

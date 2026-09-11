@@ -34,9 +34,10 @@ import {
   sessionTotals,
 } from './providers'
 import { configureUsageLog, reportDocument, reportProvider } from './providers/usage'
+import { ferryStatus, shutdownFerry } from './index/ferry'
 import { linkRepo, matchCode } from './repo/match'
 import { readCode } from './repo/read'
-import { clearApiKey, setApiKey, setOllamaHost, setProvider } from './settings'
+import { clearApiKey, setApiKey, setFerryCommand, setOllamaHost, setProvider } from './settings'
 
 const isDev = !app.isPackaged
 /** Diagnostics in a packaged build: TIRO_DEBUG=1 to see why a window came up blank. */
@@ -418,6 +419,14 @@ function registerIpc(): void {
     }
   })
 
+  // Optional: reports absence as a normal state, never as a failure.
+  ipcMain.handle('tiro:ferry-status', (_event, refresh?: boolean) => ferryStatus(refresh))
+
+  ipcMain.handle('tiro:set-ferry-command', async (_event, command: string) => {
+    setFerryCommand(command)
+    return ferryStatus(true)
+  })
+
   ipcMain.handle('tiro:provider-state', () => providerState())
 
   ipcMain.handle('tiro:set-provider', (_event, provider: ProviderId, model: string) => {
@@ -496,6 +505,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
+    shutdownFerry()
     const { requests, cost, unpriced } = sessionTotals()
     if (requests === 0) return
     const unpricedNote = unpriced > 0 ? ` (${unpriced} not priced)` : ''

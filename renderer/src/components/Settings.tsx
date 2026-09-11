@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ModelOption, ProviderId, ProviderState } from '@shared/types'
+import type { FerryStatus, ModelOption, ProviderId, ProviderState } from '@shared/types'
 
 interface SettingsProps {
   state: ProviderState
@@ -31,6 +31,9 @@ export function Settings({ state, onState, onClose }: SettingsProps) {
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
   const [host, setHost] = useState(state.ollamaHost)
+  const [ferry, setFerry] = useState<FerryStatus | null>(null)
+  const [ferryPath, setFerryPath] = useState('')
+  const [lookingForFerry, setLookingForFerry] = useState(false)
 
   const provider = state.provider
   const label = PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider
@@ -64,6 +67,21 @@ export function Settings({ state, onState, onClose }: SettingsProps) {
     setModelError(null)
     if (state.local || state.hasKey) void loadModels(provider)
   }, [provider, state.local, state.hasKey, loadModels])
+
+  // Optional, so it is reported quietly and never blocks the sheet.
+  useEffect(() => {
+    void window.tiro.getFerryStatus().then(setFerry)
+  }, [])
+
+  const lookForFerry = async (command?: string): Promise<void> => {
+    setLookingForFerry(true)
+    setFerry(
+      command !== undefined
+        ? await window.tiro.setFerryCommand(command)
+        : await window.tiro.getFerryStatus(true),
+    )
+    setLookingForFerry(false)
+  }
 
   const pickProvider = async (next: ProviderId): Promise<void> => {
     setError(null)
@@ -250,6 +268,51 @@ export function Settings({ state, onState, onClose }: SettingsProps) {
           {!state.local && !state.hasKey && (
             <p className="panel-note">Save a key first and the model list fills in.</p>
           )}
+        </div>
+
+        <div className="field">
+          <label className="field-label" htmlFor="ferry-path">
+            Document index — optional
+          </label>
+
+          {ferry === null ? (
+            <p className="panel-note">Checking…</p>
+          ) : ferry.available ? (
+            <p className="sheet-status">
+              Found <code>{ferry.command}</code>
+              {ferry.source === 'path' ? ' on PATH' : ` (${ferry.source})`} ·{' '}
+              {ferry.tools.length} tool{ferry.tools.length === 1 ? '' : 's'}. Long documents will
+              be searched rather than sent whole.
+            </p>
+          ) : (
+            <p className="panel-note">{ferry.reason}</p>
+          )}
+
+          <div className="field-row">
+            <input
+              id="ferry-path"
+              className="sheet-input is-plain"
+              value={ferryPath}
+              placeholder={ferry?.command ?? 'path to the ferry executable'}
+              spellCheck={false}
+              onChange={(event) => setFerryPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void lookForFerry(ferryPath)
+              }}
+            />
+            <button
+              type="button"
+              className="button-ghost"
+              disabled={lookingForFerry}
+              onClick={() => void lookForFerry(ferryPath || undefined)}
+            >
+              {lookingForFerry ? 'Looking…' : 'Look again'}
+            </button>
+          </div>
+          <p className="panel-note">
+            Only used for documents long enough to warrant it — a textbook, not a paper. Tiro
+            works the same without it.
+          </p>
         </div>
 
         <div className="sheet-actions">

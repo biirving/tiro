@@ -1,11 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import type { ModelOption } from '@shared/types'
+import type { McpToolSpec, ModelOption } from '@shared/types'
 import type { StoredDoc } from '../docs'
 import { activeModel, getApiKey } from '../settings'
 import { MissingKeyError, MissingModelError } from './errors'
-import { documentBlock, GUIDE, REPO_GUIDE, userTurn } from './prompts'
-import { CODE_TOOLS, describeToolCall, runCodeTool } from '../repo/tools'
+import { documentBlock, GUIDE, userTurn } from './prompts'
 import { historyTurns, type AskArgs, type Provider, type StructuredCall } from './types'
 import { fromAnthropicUsage, reportUsage } from './usage'
 
@@ -52,8 +51,8 @@ const WRAP_UP =
   'You have used the search budget for this question. Do not look anything else up. ' +
   'Answer now with what you have found, and say plainly what you were unable to determine.'
 
-function repoTools(): Anthropic.Beta.BetaToolUnion[] {
-  return CODE_TOOLS.map((tool) => ({
+function asAnthropicTools(specs: McpToolSpec[]): Anthropic.Beta.BetaToolUnion[] {
+  return specs.map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.parameters as Anthropic.Beta.BetaTool['input_schema'],
@@ -66,9 +65,9 @@ function repoTools(): Anthropic.Beta.BetaToolUnion[] {
  * The repository guidance is part of it, so a document with a repo linked keeps
  * one cache entry across all its questions rather than alternating.
  */
-function system(doc: StoredDoc, withRepo: boolean): Anthropic.Beta.BetaTextBlockParam[] {
+function system(doc: StoredDoc, guide: string): Anthropic.Beta.BetaTextBlockParam[] {
   return [
-    { type: 'text', text: withRepo ? `${GUIDE}\n\n${REPO_GUIDE}` : GUIDE },
+    { type: 'text', text: guide ? `${GUIDE}\n\n${guide}` : GUIDE },
     {
       type: 'text',
       text: documentBlock(doc),
@@ -81,10 +80,10 @@ function system(doc: StoredDoc, withRepo: boolean): Anthropic.Beta.BetaTextBlock
 export const anthropicProvider: Provider = {
   id: 'anthropic',
 
-  async streamAnswer({ doc, request, emit, signal }: AskArgs) {
+  async streamAnswer({ doc, request, tools: bundle, emit, signal }: AskArgs) {
     const started = Date.now()
-    const repoPath = request.repoPath
-    const tools = repoPath ? repoTools() : undefined
+    const hasTools = bundle.specs.length > 0
+    const tools = hasTools ? asAnthropicTools(bundle.specs) : undefined
 
     const messages: Anthropic.Beta.BetaMessageParam[] = [
       ...historyTurns(request),
@@ -107,7 +106,7 @@ export const anthropicProvider: Provider = {
           fallbacks: 'default',
           thinking: { type: 'adaptive' },
           output_config: { effort: DOC_EFFORT },
-          system: system(doc, Boolean(repoPath)),
+          system: system(doc, bundle.guide),
           ...(tools ? { tools } : {}),
           ...(wrapUp ? { tool_choice: { type: 'none' as const } } : {}),
           messages,
@@ -138,7 +137,7 @@ export const anthropicProvider: Provider = {
         return
       }
 
-      if (final.stop_reason !== 'tool_use' || !repoPath || wrapUp) {
+      if (final.stop_reason !== 'tool_use' || !hasTools || wrapUp) {
         emit({ type: 'done' })
         return
       }
@@ -150,10 +149,10 @@ export const anthropicProvider: Provider = {
       const results: Anthropic.Beta.BetaToolResultBlockParam[] = []
       for (const block of final.content) {
         if (block.type !== 'tool_use') continue
-        emit({ type: 'tool', text: describeToolCall(block.name, block.input) })
+        emit({ type: 'tool', text: bundle.describe(block.name, block.input) })
         let output: string
         try {
-          output = await runCodeTool(repoPath, block.name, block.input)
+          output = await bundle.run(block.name, block.input)
         } catch (error) {
           output = `That lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`
         }
@@ -178,7 +177,7 @@ export const anthropicProvider: Provider = {
         // Same effort, thinking, betas, model, and system blocks as an answer,
         // so every request about this document shares one cache entry.
         output_config: { effort: DOC_EFFORT, format: zodOutputFormat(schema) },
-        system: system(doc, false),
+        system: system(doc, ''),
         messages: [{ role: 'user', content: user }],
       },
       // A few hundred pages at high effort can run for minutes.

@@ -296,6 +296,29 @@ Nothing is ever silently truncated. A document past roughly 650k tokens is
 refused outright, and on a local model, one past that model's own window is
 refused with both numbers in the message.
 
+### Long documents, and the optional index
+
+A 686-page textbook is about 378k tokens. That still fits in context, but it
+costs ~$0.19 a question against ~$0.01 for a paper, which is the real problem at
+that scale — not capacity.
+
+So Tiro can use [ferry](https://github.com/) as a search index when it is
+installed: the model searches the document and reads the pages it needs instead
+of carrying the whole thing. Ferry wraps the fluffy graph engine, whose
+`search_hybrid` fuses dense HNSW and BM25 in one call, and whose entity
+attributes carry the page number through retrieval — so citations keep working.
+
+**It is entirely optional.** Tiro looks for a `ferry` executable on PATH (or a
+path you set in Settings, or `TIRO_FERRY_COMMAND`). If there isn't one, the
+probe fails in about 4ms, nothing is reported as broken, and every other feature
+behaves exactly as it did before the index existed. The tools it contributes are
+assembled per request, so with no ferry the model is sent no index tools at all.
+
+The index only engages for documents past ~120k tokens — roughly 150 dense
+pages. Below that, whole-document context is both better and cheaper, and tool
+definitions render ahead of the system prompt, so adding them to a paper would
+buy a second cache entry for nothing.
+
 ## Shortcuts
 
 | | |
@@ -327,6 +350,11 @@ electron/          main process — window, menu, IPC
     ollama.ts      local: native API, so num_ctx can be sized to the document
     index.ts       registry, cancellation, error translation
     usage.ts       token accounting, pricing, and the [tiro] log lines
+  index/
+    mcp.ts         a small MCP stdio client (initialize, tools/list, tools/call)
+    ferry.ts       finds ferry if it is installed; absence is a normal outcome
+  tools/
+    registry.ts    the tools one request gets — repo, index, or none
   repo/
     scan.ts        git ls-files, then a regex pass for declarations
     candidates.ts  concept terms to candidate code, locally and for free

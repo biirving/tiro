@@ -34,6 +34,7 @@ import { describeOpenAIError, isOpenAIAbort, openaiProvider } from './openai'
 import { ollamaProvider } from './ollama'
 import { CONCEPTS_TASK, ConceptsSchema, normalizeConcepts } from './prompts'
 import type { Provider, StructuredCall } from './types'
+import { toolsFor } from '../tools/registry'
 import { reportFailure } from './usage'
 
 export { sessionTotals } from './usage'
@@ -93,7 +94,8 @@ export async function ask(
   running.set(streamId, controller)
 
   try {
-    await resolve().streamAnswer({ doc, request, emit, signal: controller.signal })
+    const tools = await toolsFor(request, doc)
+    await resolve().streamAnswer({ doc, request, tools, emit, signal: controller.signal })
   } catch (error) {
     if (controller.signal.aborted || isAbort(error)) {
       emit({ type: 'done' })

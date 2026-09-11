@@ -1,10 +1,13 @@
 import type * as z from 'zod'
 import type { AskEvent, AskRequest, ModelOption, ProviderId } from '@shared/types'
 import type { StoredDoc } from '../docs'
+import type { ToolBundle } from '../tools/registry'
 
 export interface AskArgs {
   doc: StoredDoc
   request: AskRequest
+  /** Whatever tools this request has, possibly none. */
+  tools: ToolBundle
   emit: (event: AskEvent) => void
   signal: AbortSignal
 }

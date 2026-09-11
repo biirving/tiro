@@ -36,6 +36,8 @@ const ENV_KEYS: Record<ProviderId, string | null> = {
 export const PROVIDERS_WITHOUT_KEYS: ProviderId[] = ['ollama']
 
 interface StoredSettings {
+  /** Path to the `ferry` executable, when it is not on PATH. Optional always. */
+  ferryCommand?: string
   provider: ProviderId
   /** Remembered per provider, so switching back and forth keeps your choice. */
   models: Partial<Record<ProviderId, string>>
@@ -110,6 +112,15 @@ export function activeProvider(): ProviderId {
 
 export function activeModel(provider: ProviderId = activeProvider()): string {
   return settings().models[provider]?.trim() ?? ''
+}
+
+export function ferryCommand(): string | undefined {
+  const value = settings().ferryCommand?.trim()
+  return value ? value : undefined
+}
+
+export function setFerryCommand(command: string): void {
+  persist({ ...settings(), ferryCommand: command.trim() || undefined })
 }
 
 export function ollamaHost(): string {

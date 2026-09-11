@@ -34,6 +34,9 @@ const bridge: TiroBridge = {
   },
   cancelAsk: (streamId) => ipcRenderer.send('tiro:cancel-ask', streamId),
 
+  getFerryStatus: (refresh?: boolean) => ipcRenderer.invoke('tiro:ferry-status', refresh),
+  setFerryCommand: (command: string) =>
+    ipcRenderer.invoke('tiro:set-ferry-command', command),
   getProviderState: () => ipcRenderer.invoke('tiro:provider-state'),
   setProvider: (provider: ProviderId, model: string) =>
     ipcRenderer.invoke('tiro:set-provider', provider, model),

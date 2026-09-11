@@ -281,11 +281,18 @@ export function Settings({ state, onState, onClose }: SettingsProps) {
             <p className="sheet-status">
               Found <code>{ferry.command}</code>
               {ferry.source === 'path' ? ' on PATH' : ` (${ferry.source})`} ·{' '}
-              {ferry.tools.length} tool{ferry.tools.length === 1 ? '' : 's'}. Long documents will
-              be searched rather than sent whole.
+              {ferry.tools.map((tool) => tool.name).join(', ')}. Long documents will be searched
+              rather than sent whole.
             </p>
           ) : (
-            <p className="panel-note">{ferry.reason}</p>
+            <>
+              <p className="panel-note">{ferry.reason}</p>
+              {ferry.installed && ferry.otherTools.length > 0 && (
+                <p className="panel-note">
+                  It does expose {ferry.otherTools.join(', ')}, which Tiro leaves alone.
+                </p>
+              )}
+            </>
           )}
 
           <div className="field-row">

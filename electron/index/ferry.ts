@@ -50,8 +50,29 @@ function candidates(): { command: string; args: string[]; source: FerryStatus['s
   return found
 }
 
+/**
+ * Tiro forwards document tools and nothing else.
+ *
+ * Ferry's own surface is agent memory — remember, recall, persona, forget —
+ * which has nothing to do with reading a textbook. Forwarding those to a model
+ * under a prompt announcing "a search index over this document" would be a lie
+ * the model then acts on, so the index counts as usable only when tools under
+ * this prefix are actually present.
+ */
+const DOC_TOOL_PREFIX = 'doc_'
+
+const isDocTool = (name: string): boolean => name.startsWith(DOC_TOOL_PREFIX)
+
 function unavailable(reason: string): FerryStatus {
-  return { available: false, source: 'none', command: null, reason, tools: [] }
+  return {
+    installed: false,
+    available: false,
+    source: 'none',
+    command: null,
+    reason,
+    tools: [],
+    otherTools: [],
+  }
 }
 
 async function probe(): Promise<FerryStatus> {
@@ -59,14 +80,24 @@ async function probe(): Promise<FerryStatus> {
     const client = new McpClient(candidate.command, candidate.args)
     try {
       await client.start(PROBE_TIMEOUT_MS)
-      const tools = await client.listTools()
-      session = { client, command: candidate.command, source: candidate.source, tools }
+      const advertised = await client.listTools()
+      const docTools = advertised.filter((tool) => isDocTool(tool.name))
+      session = { client, command: candidate.command, source: candidate.source, tools: docTools }
+
       return {
-        available: true,
+        installed: true,
+        available: docTools.length > 0,
         source: candidate.source,
         command: candidate.command,
-        reason: null,
-        tools: tools.map((tool) => ({ name: tool.name, description: tool.description })),
+        reason:
+          docTools.length > 0
+            ? null
+            : `Found ferry, but it exposes no ${DOC_TOOL_PREFIX}* tools, so there is no ` +
+              'document index to search. Tiro works the same without one.',
+        tools: docTools.map((tool) => ({ name: tool.name, description: tool.description })),
+        otherTools: advertised
+          .filter((tool) => !isDocTool(tool.name))
+          .map((tool) => tool.name),
       }
     } catch {
       // Not there, or not speaking MCP. Try the next candidate.

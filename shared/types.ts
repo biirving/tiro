@@ -146,12 +146,18 @@ export interface McpToolSpec {
  * way, and nothing surfaces an error for it.
  */
 export interface FerryStatus {
+  /** The MCP handshake succeeded — ferry is on this machine. */
+  installed: boolean
+  /** It also exposes document-index tools. Only then is the index usable. */
   available: boolean
   source: 'environment' | 'setting' | 'path' | 'none'
   command: string | null
-  /** Why it is unavailable, phrased for a reader rather than a log. */
+  /** Why it is unusable, phrased for a reader rather than a log. */
   reason: string | null
+  /** The document tools, which are the only ones Tiro forwards. */
   tools: { name: string; description: string }[]
+  /** Anything else it advertises — ferry's own memory tools, say. */
+  otherTools: string[]
 }
 
 export type ProviderId = 'anthropic' | 'openai' | 'ollama'

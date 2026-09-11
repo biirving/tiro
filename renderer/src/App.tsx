@@ -4,6 +4,7 @@ import type {
   AskMode,
   ChatTurn,
   Concept,
+  FerryStatus,
   Highlight,
   OpenedPdf,
   ProviderState,
@@ -74,6 +75,8 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const [providerState, setProviderState] = useState<ProviderState | null>(null)
+  /** Null until probed; absent stays absent and nothing is offered. */
+  const [ferry, setFerry] = useState<FerryStatus | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(true)
@@ -169,7 +172,66 @@ export function App() {
 
   useEffect(() => {
     void window.tiro.getProviderState().then(setProviderState)
+    // Optional and quiet: a machine without ferry simply never offers indexing.
+    void window.tiro.getFerryStatus().then(setFerry)
   }, [])
+
+  const canIndex = Boolean(ferry?.available && ferry.canIndex)
+
+  // Progress arrives per scope, so it lands on the tab it belongs to.
+  useEffect(
+    () =>
+      window.tiro.onIndexProgress(({ scopeId, done, total }) => {
+        setTabs((current) =>
+          current.map((tab) => {
+            if (tab.id === scopeId) {
+              return { ...tab, docIndex: { ...tab.docIndex, progress: { done, total } } }
+            }
+            if (tab.repo?.path === scopeId) {
+              return { ...tab, repoIndex: { ...tab.repoIndex, progress: { done, total } } }
+            }
+            return tab
+          }),
+        )
+      }),
+    [],
+  )
+
+  const indexDocument = useCallback(
+    async (tabId: string) => {
+      patchTab(tabId, (current) => ({
+        docIndex: { ...current.docIndex, progress: { done: 0, total: 0 }, error: null },
+      }))
+      const result = await window.tiro.indexDocument(tabId)
+      patchTab(tabId, {
+        docIndex: {
+          indexed: result.ok,
+          progress: null,
+          error: result.ok ? null : result.message,
+        },
+      })
+    },
+    [patchTab],
+  )
+
+  const indexRepo = useCallback(
+    async (tabId: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === tabId)
+      if (!tab?.repo) return
+      patchTab(tabId, (current) => ({
+        repoIndex: { ...current.repoIndex, progress: { done: 0, total: 0 }, error: null },
+      }))
+      const result = await window.tiro.indexRepo(tab.repo.path)
+      patchTab(tabId, {
+        repoIndex: {
+          indexed: result.ok,
+          progress: null,
+          error: result.ok ? null : result.message,
+        },
+      })
+    },
+    [patchTab],
+  )
 
   const refreshProvider = useCallback(async () => {
     setProviderState(await window.tiro.getProviderState())
@@ -326,6 +388,8 @@ export function App() {
           conceptsStatus: restored.length ? 'ready' : 'idle',
           conceptsError: null,
           deeper: {},
+          docIndex: { indexed: false, progress: null, error: null },
+          repoIndex: { indexed: false, progress: null, error: null },
           repo: record.repo ?? null,
           codeMatches: record.codeMatches ?? [],
           codeStatus: (record.codeMatches ?? []).length > 0 ? 'ready' : 'idle',
@@ -497,6 +561,8 @@ export function App() {
             history: historyFor(tab),
             // Only when linked; without it the model has no repository tools.
             repoPath: tab.repo?.path,
+            // Only once something has been indexed for this tab.
+            useIndex: tab.docIndex.indexed || tab.repoIndex.indexed,
           },
           {
             onText: (chunk) =>
@@ -940,6 +1006,8 @@ export function App() {
               setupMessage={setupMessage}
               streaming={isStreaming(active)}
               repoName={active.repo?.name ?? null}
+              docIndex={canIndex ? active.docIndex : null}
+              onIndexDocument={() => void indexDocument(active.id)}
               onOpenCode={
                 active.repo
                   ? (path, from, to) => void openCode(active.id, path, from, to)
@@ -968,6 +1036,8 @@ export function App() {
                 patchTab(active.id, { repo: null, codeMatches: [], codeStatus: 'idle' })
               }
               onMatch={() => void matchCode(active.id)}
+              repoIndex={canIndex ? active.repoIndex : null}
+              onIndexRepo={() => void indexRepo(active.id)}
               onExpand={(location) =>
                 openCode(
                   active.id,

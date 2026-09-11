@@ -35,6 +35,17 @@ const bridge: TiroBridge = {
   cancelAsk: (streamId) => ipcRenderer.send('tiro:cancel-ask', streamId),
 
   getFerryStatus: (refresh?: boolean) => ipcRenderer.invoke('tiro:ferry-status', refresh),
+  indexedScope: (scopeId: string) => ipcRenderer.invoke('tiro:indexed-scope', scopeId),
+  indexDocument: (docId: string) => ipcRenderer.invoke('tiro:index-document', docId),
+  indexRepo: (repoPath: string) => ipcRenderer.invoke('tiro:index-repo', repoPath),
+  onIndexProgress: (handler) => {
+    const listener = (
+      _event: unknown,
+      progress: { scopeId: string; done: number; total: number },
+    ) => handler(progress)
+    ipcRenderer.on('tiro:index-progress', listener)
+    return () => ipcRenderer.removeListener('tiro:index-progress', listener)
+  },
   setFerryCommand: (command: string) =>
     ipcRenderer.invoke('tiro:set-ferry-command', command),
   getProviderState: () => ipcRenderer.invoke('tiro:provider-state'),

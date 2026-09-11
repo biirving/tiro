@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { CodeLocation, Concept, ConceptCode, RepoLink } from '@shared/types'
+import { IndexRow, type IndexState } from './IndexRow'
 
 export type CodeStatus = 'idle' | 'running' | 'ready' | 'error'
 
@@ -13,6 +14,9 @@ interface CodeTabProps {
   onLink: () => void
   onUnlink: () => void
   onMatch: () => void
+  /** Null when ferry is not installed. */
+  repoIndex: IndexState | null
+  onIndexRepo: () => void
   /** Opens the file full width, above the app. */
   onExpand: (location: CodeLocation) => Promise<void>
   onSettings: () => void
@@ -28,6 +32,8 @@ export function CodeTab({
   onLink,
   onUnlink,
   onMatch,
+  repoIndex,
+  onIndexRepo,
   onExpand,
   onSettings,
 }: CodeTabProps) {
@@ -74,6 +80,10 @@ export function CodeTab({
           ×
         </button>
       </header>
+
+      {repoIndex && (
+        <IndexRow label={repo.name} what="code" state={repoIndex} onIndex={onIndexRepo} />
+      )}
 
       {status === 'running' && (
         <div className="panel-empty">

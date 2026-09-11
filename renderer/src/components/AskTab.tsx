@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatTurn } from '@shared/types'
 import { truncate } from '@/lib/text'
+import { IndexRow, type IndexState } from './IndexRow'
 import { Prose, type CodeRefHandler } from './Prose'
 
 interface AskTabProps {
@@ -8,6 +9,9 @@ interface AskTabProps {
   selection: { text: string; page: number } | null
   /** Set when a repository is linked, so the composer can say it is searchable. */
   repoName: string | null
+  /** Null when ferry is not installed, in which case nothing is offered. */
+  docIndex: IndexState | null
+  onIndexDocument: () => void
   onOpenCode?: CodeRefHandler
   setupMessage: string | null
   streaming: boolean
@@ -64,6 +68,8 @@ export function AskTab({
   chat,
   selection,
   repoName,
+  docIndex,
+  onIndexDocument,
   onOpenCode,
   setupMessage,
   streaming,
@@ -123,6 +129,15 @@ export function AskTab({
 
   return (
     <div className="ask">
+      {docIndex && (
+        <IndexRow
+          label="this document"
+          what="document"
+          state={docIndex}
+          onIndex={onIndexDocument}
+        />
+      )}
+
       <div ref={scrollRef} className="ask-scroll">
         {chat.length === 0 ? (
           <div className="ask-openers">

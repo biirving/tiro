@@ -61,6 +61,11 @@ export interface AskRequest {
   history: { role: Role; content: string }[]
   /** When set, the answer may search and read this repository. */
   repoPath?: string
+  /**
+   * Set once something has been indexed for this document, which is what makes
+   * the search tools available. Honoured only if ferry is installed.
+   */
+  useIndex?: boolean
 }
 
 export type AskEvent =
@@ -148,8 +153,10 @@ export interface McpToolSpec {
 export interface FerryStatus {
   /** The MCP handshake succeeded — ferry is on this machine. */
   installed: boolean
-  /** It also exposes document-index tools. Only then is the index usable. */
+  /** It also exposes search tools. Only then is the index usable. */
   available: boolean
+  /** It can be written to, so a document or repo can be indexed. */
+  canIndex: boolean
   source: 'environment' | 'setting' | 'path' | 'none'
   command: string | null
   /** Why it is unusable, phrased for a reader rather than a log. */
@@ -210,6 +217,12 @@ export interface TiroBridge {
   ask(streamId: string, request: AskRequest, onEvent: (event: AskEvent) => void): Promise<void>
   cancelAsk(streamId: string): void
   getFerryStatus(refresh?: boolean): Promise<FerryStatus>
+  indexedScope(scopeId: string): Promise<{ indexed: boolean; passages: number }>
+  indexDocument(docId: string): Promise<Result<Record<string, never>>>
+  indexRepo(repoPath: string): Promise<Result<Record<string, never>>>
+  onIndexProgress(
+    handler: (progress: { scopeId: string; done: number; total: number }) => void,
+  ): () => void
   setFerryCommand(command: string): Promise<FerryStatus>
   getProviderState(): Promise<ProviderState>
   setProvider(provider: ProviderId, model: string): Promise<ProviderState>

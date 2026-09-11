@@ -23,7 +23,8 @@ import type {
   OpenedPdf,
   ProviderId,
 } from '@shared/types'
-import { putDoc } from './docs'
+import { getDoc, putDoc } from './docs'
+import { MissingDocError } from './providers'
 import {
   ask,
   cancelAsk,
@@ -34,8 +35,9 @@ import {
   sessionTotals,
 } from './providers'
 import { configureUsageLog, reportDocument, reportProvider } from './providers/usage'
-import { ferryStatus, shutdownFerry } from './index/ferry'
-import { linkRepo, matchCode } from './repo/match'
+import { chunkCode, chunkDocument } from './index/chunks'
+import { ferryStatus, indexPassages, indexedScope, shutdownFerry } from './index/ferry'
+import { linkRepo, matchCode, repoFor } from './repo/match'
 import { readCode } from './repo/read'
 import { clearApiKey, setApiKey, setFerryCommand, setOllamaHost, setProvider } from './settings'
 
@@ -421,6 +423,62 @@ function registerIpc(): void {
 
   // Optional: reports absence as a normal state, never as a failure.
   ipcMain.handle('tiro:ferry-status', (_event, refresh?: boolean) => ferryStatus(refresh))
+
+  ipcMain.handle('tiro:indexed-scope', (_event, scopeId: string) => indexedScope(scopeId))
+
+  /** Indexes the open document's own text, page numbers included. */
+  ipcMain.handle('tiro:index-document', async (event, docId: string) => {
+    const doc = getDoc(docId)
+    if (!doc) return fail(new MissingDocError())
+
+    const passages = chunkDocument(doc.pages).map((chunk) => ({
+      id: `${docId}#p${chunk.page}#${chunk.ordinal}`,
+      page: chunk.page,
+      text: chunk.text,
+    }))
+
+    const failure = await indexPassages(docId, doc.title, 'document', passages, (progress) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('tiro:index-progress', { scopeId: docId, ...progress })
+      }
+    })
+    return failure ? { ok: false as const, message: failure } : { ok: true as const }
+  })
+
+  /** Indexes a linked repository, by declaration rather than by blind window. */
+  ipcMain.handle('tiro:index-repo', async (event, repoPath: string) => {
+    try {
+      const repo = await repoFor(repoPath)
+      const byPath = new Map<string, { name: string; line: number }[]>()
+      for (const symbol of repo.symbols) {
+        const list = byPath.get(symbol.path) ?? []
+        list.push({ name: symbol.name, line: symbol.line })
+        byPath.set(symbol.path, list)
+      }
+      const files = [...repo.files.values()].map((file) => ({
+        path: file.path,
+        lines: file.lines,
+      }))
+
+      const passages = chunkCode(files, byPath).map((chunk) => ({
+        id: `${repoPath}#${chunk.path}#${chunk.startLine}`,
+        path: chunk.path,
+        start_line: chunk.startLine,
+        end_line: chunk.endLine,
+        symbol: chunk.symbol ?? '',
+        text: chunk.text,
+      }))
+
+      const failure = await indexPassages(repoPath, repo.name, 'code', passages, (progress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('tiro:index-progress', { scopeId: repoPath, ...progress })
+        }
+      })
+      return failure ? { ok: false as const, message: failure } : { ok: true as const }
+    } catch (error) {
+      return fail(error)
+    }
+  })
 
   ipcMain.handle('tiro:set-ferry-command', async (_event, command: string) => {
     setFerryCommand(command)

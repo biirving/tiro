@@ -9,6 +9,7 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { ChatTurn, Concept, ConceptCode, Highlight, RepoLink } from '@shared/types'
 import type { CodeStatus } from '@/components/CodeTab'
+import type { IndexState } from '@/components/IndexRow'
 import type { ConceptsStatus, DeeperState } from '@/components/ConceptsTab'
 import type { PanelTab } from '@/components/Panel'
 import type { PageSize } from './layout'
@@ -35,6 +36,10 @@ export interface DocTab {
   conceptsStatus: ConceptsStatus
   conceptsError: string | null
   deeper: Record<string, DeeperState>
+
+  /** What has been indexed for this tab, if ferry is installed at all. */
+  docIndex: IndexState
+  repoIndex: IndexState
 
   /** The repository this paper's code lives in, once linked. */
   repo: RepoLink | null

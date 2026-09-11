@@ -94,7 +94,7 @@ export async function ask(
   running.set(streamId, controller)
 
   try {
-    const tools = await toolsFor(request, doc)
+    const tools = await toolsFor(request)
     await resolve().streamAnswer({ doc, request, tools, emit, signal: controller.signal })
   } catch (error) {
     if (controller.signal.aborted || isAbort(error)) {

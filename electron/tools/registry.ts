@@ -8,7 +8,6 @@
  */
 
 import type { AskRequest, McpToolSpec } from '@shared/types'
-import { estimateTokens, type StoredDoc } from '../docs'
 import { ferryStatus, ferryTools, runFerryTool } from '../index/ferry'
 import { CODE_TOOLS, describeToolCall, runCodeTool } from '../repo/tools'
 import { REPO_GUIDE } from '../providers/prompts'
@@ -40,19 +39,16 @@ function describeIndexCall(name: string, input: unknown): string {
 }
 
 /**
- * Below this, whole-document context is both better and cheaper, so the index
- * stays out of the way. Tool definitions render ahead of the system prompt, so
- * adding them to a short paper would buy a second cache entry for nothing.
- * Roughly 150 dense pages.
+ * Indexing is an explicit act, so being indexed is what turns the tools on —
+ * no size heuristic deciding for the reader. Tool definitions render ahead of
+ * the system prompt, so an unindexed document sends none of them and keeps the
+ * cache entry it already had.
  */
-const INDEX_FROM_TOKENS = 120_000
-
-export async function toolsFor(request: AskRequest, doc: StoredDoc): Promise<ToolBundle> {
+export async function toolsFor(request: AskRequest): Promise<ToolBundle> {
   const repo = Boolean(request.repoPath)
-  const longEnough = estimateTokens(doc.text.length) >= INDEX_FROM_TOKENS
-  // Only probed for a document long enough to want it. Absence costs one
+  // Only probed once something has actually been indexed. Absence costs one
   // cached lookup and never throws.
-  const index = longEnough ? await ferryStatus() : { available: false as const }
+  const index = request.useIndex ? await ferryStatus() : { available: false as const }
 
   const fromIndex = index.available ? await ferryTools() : []
   if (!repo && fromIndex.length === 0) return EMPTY

@@ -314,10 +314,24 @@ probe fails in about 4ms, nothing is reported as broken, and every other feature
 behaves exactly as it did before the index existed. The tools it contributes are
 assembled per request, so with no ferry the model is sent no index tools at all.
 
-The index only engages for documents past ~120k tokens — roughly 150 dense
-pages. Below that, whole-document context is both better and cheaper, and tool
-definitions render ahead of the system prompt, so adding them to a paper would
-buy a second cache entry for nothing.
+**Indexing is a button, not a guess.** With ferry installed, the Ask tab offers
+to index the open document and the Code tab offers to index the linked
+repository. Nothing is indexed until you ask, and being indexed is what turns
+the search tools on — there is no size threshold deciding for you. An unindexed
+document sends no index tools at all and keeps the cache entry it already had.
+
+Passages are cut per page at paragraph boundaries, so every one carries an exact
+page number and can still be cited as `[p. 12]`. An over-long paragraph is split
+on a sentence end rather than mid-thought. Code is cut by declaration instead —
+a function with its body is the unit someone asks about — with the imports at the
+top of a file as their own passage, and files with no declarations falling back
+to fixed windows. Indexing this repository yields 1,176 passages, 95% of them
+named for the declaration they cover.
+
+One honest limitation: paragraph detection leans on blank lines, and a
+two-column PDF extracts with few of them. On such a paper passages land near the
+1,400-character cap and are cut on sentence boundaries rather than at true
+paragraph breaks — clean, but coarser than ideal.
 
 ## Shortcuts
 
@@ -353,6 +367,7 @@ electron/          main process — window, menu, IPC
   index/
     mcp.ts         a small MCP stdio client (initialize, tools/list, tools/call)
     ferry.ts       finds ferry if it is installed; absence is a normal outcome
+    chunks.ts      passages worth retrieving: paragraphs for prose, declarations for code
   tools/
     registry.ts    the tools one request gets — repo, index, or none
   repo/

@@ -308,6 +308,10 @@ of carrying the whole thing. Ferry wraps the fluffy graph engine, whose
 `search_hybrid` fuses dense HNSW and BM25 in one call, and whose entity
 attributes carry the page number through retrieval — so citations keep working.
 
+The half that lives in ferry is not written yet —
+[docs/DOCUMENT_INDEX.md](docs/DOCUMENT_INDEX.md) is the contract, the reasoning,
+and the numbers to verify against.
+
 **It is entirely optional.** Tiro looks for a `ferry` executable on PATH (or a
 path you set in Settings, or `TIRO_FERRY_COMMAND`). If there isn't one, the
 probe fails in about 4ms, nothing is reported as broken, and every other feature
